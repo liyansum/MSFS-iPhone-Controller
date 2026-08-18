@@ -7,12 +7,15 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <shellscalingapi.h>
+#include <iphlpapi.h>
 
 #include "AppWindow.h"
 #include "Protocol.h"
 #include <shellapi.h>
 #include <sstream>
 #include <cstring>
+
+#pragma comment(lib, "Iphlpapi.lib")
 
 AppWindow* AppWindow::self_ = nullptr;
 
@@ -22,6 +25,7 @@ enum {
     IDC_VAL_MSFS,
     IDC_VAL_IPHONE,
     IDC_VAL_IP,
+    IDC_VAL_IPLIST,
     IDC_VAL_UDP,
     IDC_VAL_TCP,
     IDC_VAL_RATE,
@@ -36,26 +40,94 @@ static const UINT WM_TRAYICON = WM_APP + 10;
 static const UINT WM_REFRESH  = WM_APP + 11;
 
 namespace {
-std::string GetLocalIP() {
-    std::string ip = "127.0.0.1";
-    char hostname[256] = { 0 };
-    if (gethostname(hostname, sizeof(hostname)) != 0) return ip;
-    addrinfo hints{};
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    addrinfo* res = nullptr;
-    if (getaddrinfo(hostname, nullptr, &hints, &res) == 0) {
-        for (addrinfo* p = res; p; p = p->ai_next) {
-            sockaddr_in* a = (sockaddr_in*)p->ai_addr;
-            char buf[INET_ADDRSTRLEN] = { 0 };
-            inet_ntop(AF_INET, &a->sin_addr, buf, sizeof(buf));
-            std::string cand = buf;
-            if (cand.rfind("192.", 0) == 0) { ip = cand; break; }
-            if (ip == "127.0.0.1") ip = cand;
-        }
-        freeaddrinfo(res);
+
+// 单条 IPv4 地址信息
+struct LocalAddrInfo {
+    std::string ip;
+    std::string adapter;     // 友好名
+    bool virtualAdapter = false;
+    bool hasGateway = false;
+};
+
+// 常见虚拟/隧道适配器关键字（匹配时视为虚拟网卡）
+bool IsVirtualAdapter(const std::wstring& desc) {
+    static const wchar_t* markers[] = {
+        L"virtualbox", L"vmware", L"hyper-v", L"wsl", L"vEthernet",
+        L"tailscale", L"docker", L"hamachi", L"zerotier", L"tap-",
+        L"wireguard", L"tunnel", L"loopback", L"ndis", L"virtual",
+        L"toad", L"kryptonet", L"zerotier",
+    };
+    std::wstring d = desc;
+    for (auto& c : d) c = (wchar_t)towlower(c);
+    for (const wchar_t* m : markers) {
+        if (d.find(m) != std::wstring::npos) return true;
     }
-    return ip;
+    return false;
+}
+
+// 枚举所有 IPv4 地址（通过 GetAdaptersAddresses）
+std::vector<LocalAddrInfo> GetLocalIpv4Addresses() {
+    std::vector<LocalAddrInfo> out;
+    ULONG size = 0;
+    GetAdaptersAddresses(AF_INET,
+                         GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+                         nullptr, nullptr, &size);
+    if (size == 0) return out;
+    std::vector<BYTE> buf(size);
+    PIP_ADAPTER_ADDRESSES p = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+    ULONG hr = GetAdaptersAddresses(AF_INET,
+                                    GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+                                    nullptr, p, &size);
+    if (hr != NO_ERROR) return out;
+
+    for (PIP_ADAPTER_ADDRESSES a = p; a; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp) continue;
+        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+
+        bool virt = a->Description ? IsVirtualAdapter(a->Description) : false;
+        bool gw = (a->FirstGatewayAddress != nullptr && a->FirstGatewayAddress->Address.lpSockaddr != nullptr);
+
+        for (PIP_ADAPTER_UNICAST_ADDRESS u = a->FirstUnicastAddress; u; u = u->Next) {
+            sockaddr_in* sa = reinterpret_cast<sockaddr_in*>(u->Address.lpSockaddr);
+            if (!sa || sa->sin_family != AF_INET) continue;
+            char ip[INET_ADDRSTRLEN] = { 0 };
+            inet_ntop(AF_INET, &sa->sin_addr, ip, sizeof(ip));
+            std::string name;
+            if (a->FriendlyName) {
+                int n = WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, nullptr, 0, nullptr, nullptr);
+                if (n > 0) {
+                    name.resize(n);
+                    WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, name.data(), n, nullptr, nullptr);
+                    name.resize(n - 1);   // 去掉结尾 NUL
+                }
+            }
+            out.push_back({ ip, name, virt, gw });
+        }
+    }
+    return out;
+}
+
+// 推荐 IP：优先“非虚拟 + 有网关”的真实网卡，其次非虚拟网卡，最后任意
+std::string RecommendLocalIp() {
+    std::vector<LocalAddrInfo> list = GetLocalIpv4Addresses();
+    for (const auto& a : list)
+        if (!a.virtualAdapter && a.hasGateway) return a.ip;
+    for (const auto& a : list)
+        if (!a.virtualAdapter) return a.ip;
+    if (!list.empty()) return list.front().ip;
+    return "127.0.0.1";
+}
+
+// 全部 IPv4 地址（逗号分隔）
+std::string AllLocalIps() {
+    std::vector<LocalAddrInfo> list = GetLocalIpv4Addresses();
+    std::string s;
+    for (const auto& a : list) {
+        if (!s.empty()) s += ", ";
+        s += a.ip;
+        if (!a.adapter.empty()) s += "(" + a.adapter + ")";
+    }
+    return s.empty() ? "127.0.0.1" : s;
 }
 
 void EnableHighDPI() {
@@ -104,7 +176,7 @@ bool AppWindow::Create(HINSTANCE inst, StatusStore* status) {
 
     hwnd_ = CreateWindowExW(0, L"MSFSiPhoneControllerWnd", L"MSFS iPhone Controller",
                             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                            CW_USEDEFAULT, CW_USEDEFAULT, 460, 460,
+                            CW_USEDEFAULT, CW_USEDEFAULT, 620, 470,
                             nullptr, nullptr, inst, nullptr);
     return hwnd_ != nullptr;
 }
@@ -172,7 +244,8 @@ void AppWindow::RefreshUi(HWND hwnd) {
 
     SetDlgItemTextA(hwnd, IDC_VAL_MSFS, msfs.str().c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_IPHONE, iphone.str().c_str());
-    SetDlgItemTextA(hwnd, IDC_VAL_IP, GetLocalIP().c_str());
+    SetDlgItemTextA(hwnd, IDC_VAL_IP, RecommendLocalIp().c_str());
+    SetDlgItemTextA(hwnd, IDC_VAL_IPLIST, AllLocalIps().c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_UDP, std::to_string(proto::kDefaultUdpPort).c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_TCP, std::to_string(proto::kDefaultTcpPort).c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_RATE, rate.str().c_str());
@@ -209,13 +282,15 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                                      hwnd, (HMENU)IDC_LABEL_TITLE, hInst, nullptr);
         SendMessageW(title, WM_SETFONT, (WPARAM)hBold, TRUE);
 
-        int y = 56, row = 28, lx = 24, lw = 110, vx = 140, vw = 260;
+        int y = 56, row = 28, lx = 24, lw = 110, vx = 140, vw = 450;
         add(L"MSFS:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_MSFS, vx, y, vw, 20); y += row;
         add(L"iPhone:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_IPHONE, vx, y, vw, 20); y += row;
         add(L"Local IP:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_IP, vx, y, vw, 20); y += row;
+        add(L"All IPs:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
+        add(L"", IDC_VAL_IPLIST, vx, y, vw, 20); y += row;
         add(L"UDP Port:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_UDP, vx, y, vw, 20); y += row;
         add(L"TCP Port:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);

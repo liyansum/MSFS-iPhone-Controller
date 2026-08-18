@@ -57,6 +57,18 @@ cmake --build build --config Release
 3. 记下窗口中的 `Local IP`，在 iPhone App 设置页填入。
 4. 最小化到托盘即可，也可勾选 `Start with Windows` 开机自启。
 
+## 多网卡说明
+
+UDP(36666) 与 TCP(36667) 服务器默认绑定 `INADDR_ANY`，即**同时监听所有网卡**，
+任意一张网卡上到达的连接都能接收。
+
+窗口中的 `Local IP` 为自动推荐：优先「非虚拟适配器 + 有网关」的真实网卡
+（自动排除 VirtualBox / VMware / WSL / Tailscale 等虚拟与隧道网卡）；
+`All IPs` 列出全部 IPv4 地址（含适配器名），便于你为手机所在的子网挑选正确 IP。
+
+> 若手机连不上，除确认使用正确 IP 外，还需在 Windows 防火墙中允许本程序
+> 「专用网络」入站（首次运行时弹出的防火墙提示请勾选专用网络）。
+
 ## 模块说明
 
 | 文件 | 职责 |

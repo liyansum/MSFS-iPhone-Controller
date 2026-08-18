@@ -38,7 +38,7 @@ target_include_directories(MSFSiPhoneController PRIVATE
 target_link_directories(MSFSiPhoneController PRIVATE
     "${SIMCONNECT_SDK_PATH}/lib")
 target_link_libraries(MSFSiPhoneController PRIVATE
-    SimConnect.lib ws2_32 shell32)
+    SimConnect.lib ws2_32 shell32 iphlpapi)
 
 target_compile_definitions(MSFSiPhoneController PRIVATE
     _CRT_SECURE_NO_WARNINGS
