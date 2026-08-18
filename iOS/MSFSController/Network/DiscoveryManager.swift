@@ -83,7 +83,7 @@ final class DiscoveryManager {
 
             var pfd = pollfd(fd: sock, events: Int16(POLLIN), revents: 0)
             let n = poll(&pfd, 1, 400)
-            if n > 0 && (pfd.revents & POLLIN) != 0 {
+            if n > 0 && (pfd.revents & Int16(POLLIN)) != 0 {
                 var from = sockaddr_in()
                 var len = socklen_t(MemoryLayout<sockaddr_in>.size)
                 let r = buf.withUnsafeMutableBytes { ptr -> Int in
