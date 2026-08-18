@@ -45,3 +45,11 @@ target_compile_definitions(MSFSiPhoneController PRIVATE
     _WINSOCK_DEPRECATED_NO_WARNINGS
     WIN32_LEAN_AND_MEAN
     NOMINMAX)
+
+# 构建后把 SimConnect.dll 复制到 exe 旁（运行时依赖，避免缺少 DLL 报错）
+if(EXISTS "${SIMCONNECT_SDK_PATH}/lib/SimConnect.dll")
+    add_custom_command(TARGET MSFSiPhoneController POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SIMCONNECT_SDK_PATH}/lib/SimConnect.dll"
+            "$<TARGET_FILE_DIR:MSFSiPhoneController>/SimConnect.dll")
+endif()

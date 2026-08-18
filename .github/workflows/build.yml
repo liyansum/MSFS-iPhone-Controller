@@ -24,7 +24,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MSFSiPhoneController-Windows
-          path: build/Release/MSFSiPhoneController.exe
+          path: |
+            build/Release/MSFSiPhoneController.exe
+            build/Release/SimConnect.dll
           if-no-files-found: warn
 
   ios:
@@ -61,9 +63,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/MSFSController.app Payload/
+          zip -qry MSFSController.ipa Payload/
+          echo "IPA size: $(du -h MSFSController.ipa | cut -f1)"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MSFSController-iOS
-          path: build/Build/Products/Release-iphoneos/MSFSController.app
+          path: MSFSController.ipa
           if-no-files-found: warn

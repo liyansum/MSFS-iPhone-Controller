@@ -31,6 +31,17 @@ xcodegen generate
 3. 回到 CONTROL 页：点击 `GYRO ARM`（自动执行一次 RECENTER）开始姿态控制。
 4. 地图页自动跟随飞机；切回控制页需要重新 ARM。
 
+## CI 产物（无签名 .ipa）
+
+GitHub Actions 产出的 `MSFSController.ipa` 为**未签名**包（`Payload/MSFSController.app`）。
+用以下任一方式安装到 iPhone：
+
+- **Sideloadly**（Windows/macOS）：拖入 .ipa 用你的 Apple ID 签名安装
+- **AltStore / AltServer**：以个人 Apple ID 侧载
+- **Xcode 自签**：Window > Devices 手动安装
+
+> 需要 iOS 17+ 真机；CoreMotion、局域网权限均需真机。
+
 ## 模块说明
 
 | 目录 | 内容 |

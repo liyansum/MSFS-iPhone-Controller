@@ -1,11 +1,12 @@
 # SimConnect SDK（第三方）
 
 本目录镜像了 Microsoft Flight Simulator 2020 的 **SimConnect SDK** 中 C++ 桌面程序编译
-所需的两个文件，供无 SDK 环境（如 CI）构建使用：
+所需的文件，供无 SDK 环境（如 CI）构建使用：
 
 ```text
 include/SimConnect.h       微软官方头文件
-lib/SimConnect.lib         动态链接导入库（运行时需 SimConnect.dll，随 MSFS 安装提供）
+lib/SimConnect.lib         动态链接导入库
+lib/SimConnect.dll         SimConnect 运行时（构建后复制到 exe 旁）
 lib/static/SimConnect.lib  静态链接库
 ```
 
