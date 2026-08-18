@@ -21,6 +21,7 @@ struct SettingsView: View {
             gyroSection
             networkSection
             safetySection
+            diagnosticsSection
         }
         .onAppear {
             editingHost = settings.host
@@ -147,16 +148,22 @@ struct SettingsView: View {
         guard !scanning else { return }
         scanning = true
         discovered.removeAll()
+        discovery.onLog = { [weak self] msg in
+            // DiscoveryManager 是类，闭包可用 weak self 捕获当前视图上下文
+            self?.conn.logDiag(msg)
+        }
         discovery.start { host in
             let existingIps = Set(self.discovered.flatMap { $0.ips })
             let newIps = host.ips.filter { !existingIps.contains($0) }
             guard !newIps.isEmpty else { return }
             self.discovered.append(host)
         }
+        conn.logDiag("开始自动探测 (6s)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
             if self.scanning {
                 self.scanning = false
                 self.discovery.stop()
+                self.conn.logDiag("自动探测结束")
             }
         }
     }
@@ -232,6 +239,41 @@ struct SettingsView: View {
     private var safetySection: some View {
         Section("SAFETY") {
             LabeledContent("Disconnect Timeout", value: "250 ms")
+        }
+    }
+
+    // MARK: - DIAGNOSTICS
+
+    private var diagnosticsSection: some View {
+        Section {
+            LabeledContent("网络路径", value: conn.networkStatus)
+            if conn.networkStatus.contains("本地网络权限被拒绝") {
+                Text("请到 iPhone「设置 > 隐私与安全性 > 本地网络」允许本 App，然后完全退出并重启 App")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            LabeledContent("TCP/UDP", value: conn.phase == .connected ? "已连接" : "未连接")
+            LabeledContent("探测发送/应答", value: "\(discovery.sentCount) / \(discovery.replyCount)")
+
+            Button("清除日志") {
+                conn.clearDiagnostics()
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(conn.diagnostics, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+        } header: {
+            Text("DIAGNOSTICS")
+        } footer: {
+            Text("若日志为空，说明 App 未发起任何网络请求：请确认 iPhone 已连接 Wi-Fi（非蜂窝），并检查本地网络权限。")
         }
     }
 

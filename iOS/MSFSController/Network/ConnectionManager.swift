@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import Network
 
 // 连接与控制的协调者：TCP 会话、UDP 控制、陀螺仪生命周期、命令发送。
 
@@ -16,6 +17,8 @@ final class ConnectionManager: ObservableObject {
     @Published var rttMs: Int?
     @Published var gyroState: GyroArmState = .disarmed
     @Published var lastError: String?
+    @Published private(set) var diagnostics: [String] = []
+    @Published private(set) var networkStatus = "未知"
 
     // MARK: - 内部
 
@@ -25,12 +28,15 @@ final class ConnectionManager: ObservableObject {
     private let engine: ControlEngine
     private var motion: MotionManager?
     private var cancellables = Set<AnyCancellable>()
+    private var pathMonitor: NWPathMonitor?
 
     private var pendingTestCompletion: ((Bool, String) -> Void)?
     private var connectTimer: DispatchWorkItem?
     private var udpHost = ""
     private var udpPort: UInt16 = 0
     private var controlRate = 60.0
+
+    private static let maxLogCount = 60
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -39,6 +45,74 @@ final class ConnectionManager: ObservableObject {
         settings.$gyro
             .sink { [weak self] g in self?.engine.applySettings(g) }
             .store(in: &cancellables)
+        startPathMonitor()
+    }
+
+    private func startPathMonitor() {
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let desc = Self.describe(path)
+            self?.onMain { [weak self] in
+                self?.networkStatus = desc
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "msfs.path"))
+    }
+
+    private static func describe(_ path: NWPath) -> String {
+        var parts: [String] = []
+        switch path.status {
+        case .satisfied: parts.append("网络可用")
+        case .unsatisfied:
+            parts.append("网络不可用")
+            if #available(iOS 15, *) {
+                switch path.unsatisfiedReason {
+                case .localNetworkDenied:
+                    parts.append("本地网络权限被拒绝！请到 设置>隐私>本地网络 允许本 App，并完全重启 App")
+                case .notAvailable:
+                    parts.append("未连接到网络")
+                case .cellularDenied:
+                    parts.append("蜂窝数据被拒绝")
+                case .wifiDenied:
+                    parts.append("Wi-Fi 被拒绝")
+                case .vpnBlocked:
+                    parts.append("VPN 拦截")
+                @unknown default:
+                    break
+                }
+            }
+        case .requiresConnection: parts.append("需要连接")
+        @unknown default: break
+        }
+        if path.usesInterfaceType(.wifi) { parts.append("Wi-Fi") }
+        if path.usesInterfaceType(.cellular) { parts.append("蜂窝") }
+        if path.usesInterfaceType(.wiredEthernet) { parts.append("有线") }
+        return parts.joined(separator: " | ")
+    }
+
+    /// 追加诊断日志（主线程安全）
+    func logDiag(_ msg: String) {
+        let line = Self.nowString() + " " + msg
+        onMain { [weak self] in
+            guard let self = self else { return }
+            self.diagnostics.append(line)
+            if self.diagnostics.count > Self.maxLogCount {
+                self.diagnostics.removeFirst(self.diagnostics.count - Self.maxLogCount)
+            }
+        }
+    }
+
+    func clearDiagnostics() {
+        onMain { [weak self] in
+            self?.diagnostics.removeAll()
+        }
+    }
+
+    private static func nowString() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f.string(from: Date())
     }
 
     var hasConnection: Bool { phase == .connected }
@@ -62,6 +136,8 @@ final class ConnectionManager: ObservableObject {
         tcp.onConnected = { [weak self] in self?.sendHello() }
         tcp.onDisconnected = { [weak self] _ in self?.handleDisconnected() }
         tcp.onMessage = { [weak self] data in self?.handleTcpMessage(data) }
+        tcp.onStateLog = { [weak self] msg in self?.logDiag(msg) }
+        logDiag("connect host=\(host) udp=\(udpPort) tcp=\(tcpPort)")
         tcp.connect(host: host, port: tcpPort)
 
         connectTimer?.cancel()
@@ -202,6 +278,7 @@ final class ConnectionManager: ObservableObject {
             engine.setSession(sid)
             let sim = obj["simConnected"] as? Bool ?? false
             let name = obj["aircraftName"] as? String ?? ""
+            logDiag("welcome: session=\(sid) sim=\(sim) aircraft=\(name)")
             onMain { [self] in
                 phase = .connected
                 pcConnected = true
@@ -246,6 +323,7 @@ final class ConnectionManager: ObservableObject {
         engine.setArmed(false)
         engine.setSession(0)
         udp.stop()
+        logDiag("TCP 连接断开")
         onMain { [self] in
             if phase == .connecting { lastError = "无法连接主机，请检查 IP 与端口" }
             phase = .disconnected
@@ -270,6 +348,7 @@ final class ConnectionManager: ObservableObject {
     // MARK: - UDP
 
     private func startUdp() {
+        logDiag("UDP 启动 host=\(udpHost) port=\(udpPort) rate=\(controlRate)Hz")
         udp.start(host: udpHost, port: udpPort)
         udp.receive { [weak self] data in self?.handleUdpPacket(data) }
         udp.startControlLoop(rateHz: controlRate) { [weak self] in

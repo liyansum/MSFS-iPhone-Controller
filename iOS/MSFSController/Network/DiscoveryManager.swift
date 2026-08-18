@@ -18,6 +18,9 @@ final class DiscoveryManager {
     private var running = false
     private var thread: Thread?
     private var onHost: ((Host) -> Void)?
+    var onLog: ((String) -> Void)?
+    private(set) var sentCount = 0
+    private(set) var replyCount = 0
 
     var isRunning: Bool { running }
 
@@ -26,9 +29,16 @@ final class DiscoveryManager {
         guard !running else { return }
         running = true
         self.onHost = onHost
+        sentCount = 0
+        replyCount = 0
 
         sock = socket(AF_INET, SOCK_DGRAM, 0)
-        if sock < 0 { running = false; return }
+        if sock < 0 {
+            onLog?("UDP 探测: socket 创建失败 (errno \(errno))")
+            running = false
+            return
+        }
+        onLog?("UDP 探测: socket 已创建")
 
         var broadcast: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
@@ -45,11 +55,13 @@ final class DiscoveryManager {
             }
         }
         if bound != 0 {
+            onLog?("UDP 探测: bind 失败 (errno \(errno))")
             close(sock)
             sock = -1
             running = false
             return
         }
+        onLog?("UDP 探测: 开始广播 \(Proto.discoveryRequest.trimmingCharacters(in: .newlines)) -> 255.255.255.255:\(Proto.discoveryPort)")
 
         let t = Thread { [weak self] in self?.loop() }
         t.name = "msfs.discovery"
@@ -95,6 +107,7 @@ final class DiscoveryManager {
                     }
                 }
                 if r > 0 {
+                    replyCount += 1
                     handleReply(Data(buf[0..<r]))
                 }
             }
@@ -112,12 +125,18 @@ final class DiscoveryManager {
         addr.sin_port = Proto.discoveryPort.bigEndian
         addr.sin_addr.s_addr = in_addr_t(0xFFFFFFFF)   // 255.255.255.255
         let msg = Proto.discoveryRequest
+        var result = -1
         msg.withCString { c in
-            _ = withUnsafePointer(to: &addr) { p in
+            result = withUnsafePointer(to: &addr) { p -> Int in
                 p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(sock, c, msg.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    Int(sendto(sock, c, msg.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)))
                 }
             }
+        }
+        if result > 0 {
+            sentCount += 1
+        } else {
+            onLog?("UDP 探测: 广播发送失败 (errno \(errno))")
         }
     }
 

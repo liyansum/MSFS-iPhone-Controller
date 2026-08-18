@@ -11,30 +11,55 @@ final class TCPClient {
     var onConnected: (() -> Void)?
     var onDisconnected: ((Error?) -> Void)?
     var onMessage: ((Data) -> Void)?
+    var onStateLog: ((String) -> Void)?
 
     func connect(host: String, port: UInt16) {
         guard let port = NWEndpoint.Port(rawValue: port) else {
+            onStateLog?("TCP 端口无效")
             onDisconnected?(nil)
             return
         }
+        onStateLog?("TCP 连接 \(host):\(port) 发起")
         let c = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
         conn = c
         c.stateUpdateHandler = { [weak self] state in
             switch state {
+            case .setup:
+                self?.onStateLog?("TCP 状态: 初始化")
+            case .waiting(let err):
+                self?.onStateLog?("TCP 状态: 等待 (\(self?.describe(err) ?? ""))")
+            case .preparing:
+                self?.onStateLog?("TCP 状态: 连接中(preparing)")
             case .ready:
+                self?.onStateLog?("TCP 状态: 已连接")
                 self?.onConnected?()
                 self?.startReceiving()
             case .failed(let err):
+                self?.onStateLog?("TCP 状态: 失败 (\(self?.describe(err) ?? ""))")
                 self?.conn = nil
                 self?.onDisconnected?(err)
             case .cancelled:
+                self?.onStateLog?("TCP 状态: 已取消")
                 self?.conn = nil
                 self?.onDisconnected?(nil)
-            default:
+            @unknown default:
                 break
             }
         }
         c.start(queue: queue)
+    }
+
+    private func describe(_ error: NWError) -> String {
+        switch error {
+        case .posix(let code):
+            return "posix \(code.rawValue)"
+        case .dns(let dns):
+            return "dns \(dns)"
+        case .tls(let tls):
+            return "tls \(tls)"
+        @unknown default:
+            return "\(error)"
+        }
     }
 
     func disconnect() {
