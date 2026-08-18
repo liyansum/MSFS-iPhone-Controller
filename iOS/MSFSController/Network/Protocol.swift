@@ -7,8 +7,10 @@ enum Proto {
     static let protocolVersion: UInt8 = 1
     static let defaultUdpPort: UInt16 = 36666
     static let defaultTcpPort: UInt16 = 36667
+    static let discoveryPort: UInt16 = 36668
     static let controlTimeout: TimeInterval = 0.25
     static let serverVersion = "1.0.0"
+    static let discoveryRequest = "MSFS_DISCOVER\n"
 
     static let kAxisAileron: UInt16 = 1 << 0
     static let kAxisElevator: UInt16 = 1 << 1
@@ -84,6 +86,7 @@ enum TcpMsg {
     static let telemetry = "telemetry"
     static let route = "route"
     static let error = "error"
+    static let hostDiscovery = "msfs_host"
 }
 
 enum TcpCmd {

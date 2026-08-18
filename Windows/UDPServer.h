@@ -19,10 +19,13 @@ public:
 
 private:
     void ThreadMain(uint16_t port);
+    void DiscoveryThread(uint16_t port);
 
     std::atomic<bool> running_{ false };
     std::thread thread_;
+    std::thread discoveryThread_;
     std::atomic<unsigned long long> sock_{ 0 };
+    std::atomic<unsigned long long> discoverySock_{ 0 };
     SessionCheck check_;
     FlightController* fc_ = nullptr;
     SafetyWatchdog* wd_ = nullptr;

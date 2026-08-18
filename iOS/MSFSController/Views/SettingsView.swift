@@ -10,14 +10,26 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
 
+    private let discovery = DiscoveryManager()
+    @State private var discovered: [DiscoveryManager.Host] = []
+    @State private var scanning = false
+
     var body: some View {
         Form {
             connectionSection
+            discoverySection
             gyroSection
             networkSection
             safetySection
         }
-        .onAppear { editingHost = settings.host }
+        .onAppear {
+            editingHost = settings.host
+            if conn.phase == .disconnected { scan() }
+        }
+        .onDisappear {
+            discovery.stop()
+            scanning = false
+        }
         .onChange(of: editingHost) { _, v in
             testResult = nil
             _ = v
@@ -92,6 +104,75 @@ struct SettingsView: View {
             }
         }
         .font(.caption)
+    }
+
+    // MARK: - DISCOVER
+
+    private var discoverySection: some View {
+        Section("DISCOVER") {
+            Button {
+                scan()
+            } label: {
+                Label(scanning ? "扫描中..." : "自动探测局域网主机", systemImage: "wifi")
+            }
+            .disabled(scanning)
+
+            if !discovered.isEmpty {
+                ForEach(discovered) { host in
+                    Button {
+                        connectTo(host: host)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(host.name.isEmpty ? "MSFS 主机" : host.name)
+                                .font(.headline)
+                            Text(host.ips.joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            } else if scanning {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            }
+
+            if !scanning && discovered.isEmpty {
+                Text("未发现主机：请确认手机与电脑在同一局域网，并在 iOS「设置 > 隐私 > 本地网络」允许本 App")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+        }
+    }
+
+    private func scan() {
+        guard !scanning else { return }
+        scanning = true
+        discovered.removeAll()
+        discovery.start { [weak self] host in
+            guard let self = self else { return }
+            let existingIps = Set(self.discovered.flatMap { $0.ips })
+            let newIps = host.ips.filter { !existingIps.contains($0) }
+            guard !newIps.isEmpty else { return }
+            self.discovered.append(host)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self = self else { return }
+            if self.scanning {
+                self.scanning = false
+                self.discovery.stop()
+            }
+        }
+    }
+
+    private func connectTo(host: DiscoveryManager.Host) {
+        guard let ip = host.ips.first else { return }
+        settings.host = ip
+        settings.udpPort = host.udpPort
+        settings.tcpPort = host.tcpPort
+        editingHost = ip
+        discovery.stop()
+        scanning = false
+        conn.connect()
+        Haptics.success()
     }
 
     // MARK: - GYRO

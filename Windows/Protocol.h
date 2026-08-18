@@ -10,6 +10,7 @@ namespace proto {
 // ---------- 网络端口 ----------
 constexpr uint16_t kDefaultUdpPort = 36666;   // 实时控制（UDP）
 constexpr uint16_t kDefaultTcpPort = 36667;   // 状态与命令（TCP）
+constexpr uint16_t kDiscoveryPort = 36668;    // 自动探测（UDP 广播，iPhone->PC）
 
 // ---------- 版本 ----------
 constexpr uint32_t kMagic = 0x4D534631;       // "MSF1"
@@ -71,6 +72,11 @@ constexpr char kCmdTrimUp[]    = "trim_up";
 constexpr char kCmdTrimDn[]    = "trim_dn";
 constexpr char kCmdParking[]   = "parking_brake";
 constexpr char kCmdBrake[]     = "brake";     // 需携带 value(bool)：按住 true / 松开 false
+
+// 自动探测（UDP 36668）
+constexpr char kDiscoveryRequest[]  = "MSFS_DISCOVER";  // iPhone 广播探测
+constexpr char kDiscoveryReplyType[] = "msfs_host";     // PC 应答 type
+constexpr char kDiscoveryReply[]     = "MSFS iPhone Controller";
 
 // 安全看门狗：实时控制包超过该时长未到达则回中
 constexpr int kControlTimeoutMs = 250;

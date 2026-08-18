@@ -162,6 +162,7 @@
     <ClCompile Include="UDPServer.cpp" />
     <ClCompile Include="TCPServer.cpp" />
     <ClCompile Include="SafetyWatchdog.cpp" />
+    <ClCompile Include="NetUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AppWindow.h" />
@@ -174,6 +175,7 @@
     <ClInclude Include="UDPServer.h" />
     <ClInclude Include="TCPServer.h" />
     <ClInclude Include="SafetyWatchdog.h" />
+    <ClInclude Include="NetUtils.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

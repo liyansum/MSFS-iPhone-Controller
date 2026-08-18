@@ -13,6 +13,9 @@
 #include <mstcpip.h>
 #include <cstring>
 #include <chrono>
+#include <sstream>
+#include <vector>
+#include "NetUtils.h"
 
 // 部分 Windows SDK 在 _WIN32_WINNT 未达标时不下发 SIO_UDP_CONNRESET，
 // 提供数值回退：_WSAIORW(IOC_VENDOR, 12) = IOC_IN|IOC_VENDOR|12
@@ -29,6 +32,7 @@ void UDPServer::Start(uint16_t port, SessionCheck check, FlightController* fc, S
     if (running_.load()) return;
     running_ = true;
     thread_ = std::thread(&UDPServer::ThreadMain, this, port);
+    discoveryThread_ = std::thread(&UDPServer::DiscoveryThread, this, proto::kDiscoveryPort);
 }
 
 void UDPServer::Stop() {
@@ -36,7 +40,10 @@ void UDPServer::Stop() {
     // 关闭套接字以解除阻塞 recvfrom
     SOCKET s = (SOCKET)sock_.exchange(0);
     if (s != INVALID_SOCKET) closesocket(s);
+    SOCKET ds = (SOCKET)discoverySock_.exchange(0);
+    if (ds != INVALID_SOCKET) closesocket(ds);
     if (thread_.joinable()) thread_.join();
+    if (discoveryThread_.joinable()) discoveryThread_.join();
 }
 
 void UDPServer::ThreadMain(uint16_t port) {
@@ -92,4 +99,57 @@ void UDPServer::ThreadMain(uint16_t port) {
 
     closesocket(sock);
     sock_.store(0);
+}
+
+// 自动探测：监听 36668 广播，回复本机信息（供 iPhone 自动发现主机）
+void UDPServer::DiscoveryThread(uint16_t port) {
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) return;
+
+    BOOL reuse = TRUE;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    if (bind(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(sock);
+        return;
+    }
+    discoverySock_.store((unsigned long long)sock);
+
+    char buf[256];
+    while (running_.load()) {
+        sockaddr_storage from{};
+        int fromLen = (int)sizeof(from);
+        int len = recvfrom(sock, buf, sizeof(buf) - 1, 0, (sockaddr*)&from, &fromLen);
+        if (len == SOCKET_ERROR) {
+            if (!running_.load()) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
+        }
+        buf[len] = '\0';
+        if (strncmp(buf, proto::kDiscoveryRequest, strlen(proto::kDiscoveryRequest)) != 0) continue;
+
+        // 构建应答：{"type":"msfs_host","name":...,"ips":[...],"udpPort":...,"tcpPort":...,"protocolVersion":...}
+        std::vector<std::string> ips = LocalIpList();
+        std::ostringstream os;
+        os << "{\"type\":\"" << proto::kDiscoveryReplyType
+           << "\",\"name\":\"" << proto::kDiscoveryReply
+           << "\",\"ips\":[";
+        for (size_t i = 0; i < ips.size(); ++i) {
+            if (i) os << ",";
+            os << "\"" << ips[i] << "\"";
+        }
+        os << "],\"udpPort\":" << (int)proto::kDefaultUdpPort
+           << ",\"tcpPort\":" << (int)proto::kDefaultTcpPort
+           << ",\"protocolVersion\":" << (int)proto::kProtocolVersion << "}";
+
+        std::string reply = os.str();
+        sendto(sock, reply.c_str(), (int)reply.size(), 0, (sockaddr*)&from, fromLen);
+    }
+
+    closesocket(sock);
+    discoverySock_.store(0);
 }

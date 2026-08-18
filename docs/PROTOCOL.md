@@ -7,6 +7,21 @@ MSFS iPhone Controller 使用两条通道：
 | UDP | 36666 | 实时控制（Aileron/Elevator/Rudder/Throttle）、Ping/Pong |
 | TCP | 36667 | 会话、可靠命令、遥测、航线 |
 
+## 自动探测（UDP 36668）
+
+iPhone 不需要手动输入 IP 即可发现 Windows 主机：
+
+```text
+iPhone  ── UDP 广播 255.255.255.255:36668  "MSFS_DISCOVER\n"  (每 2s) ──▶ 局域网
+Windows ── UDP 单播应答（回到来源地址）:
+{"type":"msfs_host","name":"MSFS iPhone Controller",
+ "ips":["192.168.1.100","192.168.56.1"],
+ "udpPort":36666,"tcpPort":36667,"protocolVersion":1}
+```
+
+Windows 监听 `36668`，仅对 `MSFS_DISCOVER` 前缀的包应答；`ips` 列出全部 IPv4
+地址，iOS 端选择任意一个即可连接。该端口不参与会话鉴权，仅用于发现。
+
 ## UDP 36666 — 固定二进制包
 
 32 字节，小端序，1 字节对齐。`magic` 不匹配或 `version` 不匹配的包直接丢弃。

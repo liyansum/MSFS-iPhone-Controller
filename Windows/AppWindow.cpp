@@ -11,6 +11,7 @@
 
 #include "AppWindow.h"
 #include "Protocol.h"
+#include "NetUtils.h"
 #include <shellapi.h>
 #include <sstream>
 #include <cstring>
@@ -42,86 +43,9 @@ static const UINT WM_REFRESH  = WM_APP + 11;
 
 namespace {
 
-// 单条 IPv4 地址信息
-struct LocalAddrInfo {
-    std::string ip;
-    std::string adapter;     // 友好名
-    bool virtualAdapter = false;
-    bool hasGateway = false;
-};
-
-// 常见虚拟/隧道适配器关键字（匹配时视为虚拟网卡）
-bool IsVirtualAdapter(const std::wstring& desc) {
-    static const wchar_t* markers[] = {
-        L"virtualbox", L"vmware", L"hyper-v", L"wsl", L"vEthernet",
-        L"tailscale", L"docker", L"hamachi", L"zerotier", L"tap-",
-        L"wireguard", L"tunnel", L"loopback", L"ndis", L"virtual",
-        L"toad", L"kryptonet", L"zerotier",
-    };
-    std::wstring d = desc;
-    for (auto& c : d) c = (wchar_t)towlower(c);
-    for (const wchar_t* m : markers) {
-        if (d.find(m) != std::wstring::npos) return true;
-    }
-    return false;
-}
-
-// 枚举所有 IPv4 地址（通过 GetAdaptersAddresses）
-std::vector<LocalAddrInfo> GetLocalIpv4Addresses() {
-    std::vector<LocalAddrInfo> out;
-    ULONG size = 0;
-    GetAdaptersAddresses(AF_INET,
-                         GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
-                         nullptr, nullptr, &size);
-    if (size == 0) return out;
-    std::vector<BYTE> buf(size);
-    PIP_ADAPTER_ADDRESSES p = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
-    ULONG hr = GetAdaptersAddresses(AF_INET,
-                                    GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
-                                    nullptr, p, &size);
-    if (hr != NO_ERROR) return out;
-
-    for (PIP_ADAPTER_ADDRESSES a = p; a; a = a->Next) {
-        if (a->OperStatus != IfOperStatusUp) continue;
-        if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
-
-        bool virt = a->Description ? IsVirtualAdapter(a->Description) : false;
-        bool gw = (a->FirstGatewayAddress != nullptr && a->FirstGatewayAddress->Address.lpSockaddr != nullptr);
-
-        for (PIP_ADAPTER_UNICAST_ADDRESS u = a->FirstUnicastAddress; u; u = u->Next) {
-            sockaddr_in* sa = reinterpret_cast<sockaddr_in*>(u->Address.lpSockaddr);
-            if (!sa || sa->sin_family != AF_INET) continue;
-            char ip[INET_ADDRSTRLEN] = { 0 };
-            inet_ntop(AF_INET, &sa->sin_addr, ip, sizeof(ip));
-            std::string name;
-            if (a->FriendlyName) {
-                int n = WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, nullptr, 0, nullptr, nullptr);
-                if (n > 0) {
-                    name.resize(n);
-                    WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, name.data(), n, nullptr, nullptr);
-                    name.resize(n - 1);   // 去掉结尾 NUL
-                }
-            }
-            out.push_back({ ip, name, virt, gw });
-        }
-    }
-    return out;
-}
-
-// 推荐 IP：优先“非虚拟 + 有网关”的真实网卡，其次非虚拟网卡，最后任意
-std::string RecommendLocalIp() {
-    std::vector<LocalAddrInfo> list = GetLocalIpv4Addresses();
-    for (const auto& a : list)
-        if (!a.virtualAdapter && a.hasGateway) return a.ip;
-    for (const auto& a : list)
-        if (!a.virtualAdapter) return a.ip;
-    if (!list.empty()) return list.front().ip;
-    return "127.0.0.1";
-}
-
-// 全部 IPv4 地址（逗号分隔）
+// 全部 IPv4 地址（逗号分隔，带适配器名）
 std::string AllLocalIps() {
-    std::vector<LocalAddrInfo> list = GetLocalIpv4Addresses();
+    std::vector<NetAddrInfo> list = GetLocalIpv4Addresses();
     std::string s;
     for (const auto& a : list) {
         if (!s.empty()) s += ", ";
