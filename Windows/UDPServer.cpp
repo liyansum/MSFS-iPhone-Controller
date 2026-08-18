@@ -11,9 +11,14 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
-#include <ws2tcpip.h>
 #include <cstring>
 #include <chrono>
+
+// 部分 Windows SDK 在 _WIN32_WINNT 未达标时不下发 SIO_UDP_CONNRESET，
+// 提供数值回退：_WSAIORW(IOC_VENDOR, 12) = IOC_IN|IOC_VENDOR|12
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET 0x9800000Cu
+#endif
 
 #pragma comment(lib, "Ws2_32.lib")
 
