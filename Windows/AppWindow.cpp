@@ -1,7 +1,12 @@
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <shellscalingapi.h>
 
 #include "AppWindow.h"
 #include "Protocol.h"
@@ -194,7 +199,7 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
         auto add = [&](const wchar_t* text, int id, int x, int y, int w, int h) {
             HWND c = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE,
-                                     x, y, w, h, hwnd, (HMENU)id, hInst, nullptr);
+                                     x, y, w, h, hwnd, (HMENU)(INT_PTR)id, hInst, nullptr);
             SendMessageW(c, WM_SETFONT, (WPARAM)hNormal, TRUE);
             return c;
         };

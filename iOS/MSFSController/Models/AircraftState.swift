@@ -2,7 +2,7 @@ import Foundation
 
 // 来自 Windows 端 telemetry JSON 的飞机状态（以 MSFS 回读为准）。
 
-struct AircraftState: Identifiable, Codable, Equatable {
+struct AircraftState: Identifiable, Decodable, Equatable {
     var id = UUID()
     var lat: Double = 0
     var lon: Double = 0

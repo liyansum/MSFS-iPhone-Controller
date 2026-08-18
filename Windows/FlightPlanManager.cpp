@@ -98,7 +98,7 @@ bool FlightPlanManager::ParseWorldPosition(const std::string& token, double& lat
     lat = lon = 0;
     bool haveLat = false, haveLon = false;
 
-    static const std::regex reDMS(R"(([NSEW])(\d+)\s*°\s*(\d+)\s*'\s*([\d.]+)")");
+    static const std::regex reDMS(R"dms(([NSEW])(\d+)\s*°\s*(\d+)\s*'\s*([\d.]+)")dms");
     static const std::regex reDec(R"(([NSEW])(\d+(?:\.\d+)?))");
 
     std::string s = token;

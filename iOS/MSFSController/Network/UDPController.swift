@@ -18,8 +18,9 @@ final class UDPController {
         let c = NWConnection(host: h, port: port, using: .udp)
         c.stateUpdateHandler = { [weak self] state in
             switch state {
-            case .failed(let err), .cancelled(let err):
-                _ = err
+            case .failed:
+                self?.conn = nil
+            case .cancelled:
                 self?.conn = nil
             default:
                 break
