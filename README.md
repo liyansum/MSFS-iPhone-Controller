@@ -1,5 +1,7 @@
 # MSFS iPhone Controller
 
+[![build](https://github.com/liyansum/MSFS-iPhone-Controller/actions/workflows/build.yml/badge.svg)](https://github.com/liyansum/MSFS-iPhone-Controller/actions/workflows/build.yml)
+
 面向 **Microsoft Flight Simulator 2020** 的无线 iPhone 飞行控制器。
 
 - **iPhone App**（SwiftUI / CoreMotion / Network.framework / MapKit）：
