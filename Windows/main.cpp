@@ -1,0 +1,135 @@
+#define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0A00
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#include "AppWindow.h"
+#include "Protocol.h"
+#include "FlightController.h"
+#include "SimConnectManager.h"
+#include "SafetyWatchdog.h"
+#include "TelemetryManager.h"
+#include "FlightPlanManager.h"
+#include "UDPServer.h"
+#include "TCPServer.h"
+
+#include <thread>
+#include <string>
+#include <chrono>
+#include <atomic>
+
+#pragma comment(lib, "Ws2_32.lib")
+
+namespace {
+long long NowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, int nCmdShow) {
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+
+    StatusStore status;
+    FlightController fc;
+    SimConnectManager sim;
+    SafetyWatchdog watchdog;
+    TelemetryManager telemetry;
+    FlightPlanManager flightPlan;
+    UDPServer udp;
+    TCPServer tcp;
+
+    // ---------- 安全看门狗 ----------
+    watchdog.Start([&]() {
+        fc.NeutralizeAxes();
+        status.SetWatchdogFired(true);
+        status.SetStatus("Watchdog: control timeout, axes centered");
+    });
+
+    // ---------- SimConnect ----------
+    sim.Start(&fc,
+        [&](const AircraftTelemetry& t) {
+            telemetry.Push(t);
+        },
+        [&](bool connected, const std::string& aircraft) {
+            status.SetSim(connected);
+            if (!aircraft.empty()) {
+                status.SetAircraft(aircraft);
+                telemetry.SetAircraftName(aircraft);
+            }
+            tcp.SendStatus(connected, aircraft);
+        },
+        [&](const std::wstring& plnFile) {
+            if (!plnFile.empty() && flightPlan.LoadFile(plnFile)) {
+                tcp.SendRoute(flightPlan);
+                status.SetFlightPlan(flightPlan.Summary());
+            }
+        });
+
+    // ---------- 遥测 ----------
+    telemetry.Start([&](const std::string& json) { tcp.SendToClient(json); });
+
+    // ---------- UDP 实时控制 ----------
+    udp.Start(proto::kDefaultUdpPort,
+              [&](uint32_t sid) { return sid == tcp.SessionId(); },
+              &fc, &watchdog);
+
+    // ---------- TCP 状态与命令 ----------
+    tcp.Start(proto::kDefaultTcpPort, &sim, &fc, &flightPlan,
+              [&]() {
+                  StatusStore::Snapshot s = status.Take();
+                  return std::make_pair(s.simConnected, s.aircraft);
+              });
+
+    // ---------- 状态监视线程：刷新连接状态 / 控制包延迟 ----------
+    std::atomic<bool> running{ true };
+    std::thread monitor([&]() {
+        while (running.load()) {
+            bool phone = tcp.SessionId() != 0;
+            status.SetIphone(phone);
+
+            long long last = watchdog.LastControlMs();
+            if (last > 0) {
+                status.SetLastControlAge(NowMs() - last);
+            } else {
+                status.SetLastControlAge(-1);
+            }
+            if (phone) status.SetStatus("Ready");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+
+    // ---------- 主窗口 ----------
+    AppWindow window;
+    if (!window.Create(hInstance, &status)) {
+        running = false;
+        monitor.join();
+        watchdog.Stop(); udp.Stop(); tcp.Stop(); telemetry.Stop(); sim.Stop();
+        WSACleanup();
+        return -1;
+    }
+    window.Show(nCmdShow);
+
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    // ---------- 关闭 ----------
+    running = false;
+    if (monitor.joinable()) monitor.join();
+    watchdog.Stop();
+    udp.Stop();
+    tcp.Stop();
+    telemetry.Stop();
+    sim.Stop();
+    WSACleanup();
+    return (int)msg.wParam;
+}

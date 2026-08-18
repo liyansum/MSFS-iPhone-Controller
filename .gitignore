@@ -1,0 +1,14 @@
+# Windows
+Windows/build/
+Windows/out/
+*.user
+.vs/
+
+# iOS / macOS
+iOS/**/*.xcodeproj/xcuserdata/
+iOS/**/.DS_Store
+DerivedData/
+
+# IDE
+.vscode/
+.idea/

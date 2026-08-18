@@ -1,0 +1,2187 @@
+# MSFS iPhone 局域网飞行控制器完整方案
+
+## 一、项目目标
+
+开发一套由 **Windows PC 端 + iPhone App** 组成的 Microsoft Flight Simulator 2020 辅助控制系统。
+
+iPhone 不显示电脑游戏画面，也不承担远程桌面功能，而是作为独立的无线飞行控制器使用。
+
+整体目标：
+
+```text
+iPhone
+│
+├─ CoreMotion 姿态控制
+│    ├─ 左右倾斜 → Aileron / Roll
+│    └─ 前后倾斜 → Elevator / Pitch
+│
+├─ Throttle 油门
+├─ Rudder 方向舵
+├─ Elevator Trim 配平
+├─ Flaps 襟翼
+├─ Brake / Parking Brake
+├─ Gear 等常用控制
+│
+└─ Map 地图
+     ├─ 当前飞机位置
+     ├─ 飞行航迹
+     ├─ 当前航线
+     ├─ 航点
+     └─ 航点经纬度
+            │
+            │ Wi-Fi LAN
+            ▼
+Windows Companion
+            │
+        SimConnect
+            │
+            ▼
+        MSFS 2020
+```
+
+第一版不使用 ViGEm、不模拟 Xbox 手柄。
+
+Windows 程序直接通过 SimConnect 向 MSFS 发送飞控事件。MSFS 2020 官方提供 `AXIS_AILERONS_SET`、`AXIS_ELEVATOR_SET`、`AXIS_RUDDER_SET`、`AXIS_ELEV_TRIM_SET` 等标准飞控输入事件，因此没有必要再经过虚拟 Xbox 控制器这一层。
+
+---
+
+# 二、整体架构
+
+```text
+┌────────────────────────────────────┐
+│               iPhone               │
+│                                    │
+│ CoreMotion                         │
+│ Control UI                         │
+│ MapKit                             │
+│ Connection Manager                 │
+└──────────────┬─────────────────────┘
+               │
+        Wi-Fi / Local LAN
+               │
+     ┌─────────┴─────────┐
+     │                   │
+ UDP 36666          TCP 36667
+ 实时控制              状态/命令
+     │                   │
+     └─────────┬─────────┘
+               ▼
+┌────────────────────────────────────┐
+│       Windows Companion App        │
+│                                    │
+│ Network Server                     │
+│ Controller Manager                 │
+│ Safety Watchdog                    │
+│ Telemetry Manager                  │
+│ Flight Plan Manager                │
+│ SimConnect Manager                 │
+└────────────────┬───────────────────┘
+                 │
+             SimConnect
+                 │
+                 ▼
+            MSFS 2020
+```
+
+Windows 是整个系统的**权威状态端**。
+
+iPhone 只负责：
+
+```text
+用户输入
+传感器输入
+控制命令
+地图显示
+```
+
+真正的飞机状态以 MSFS 返回的数据为准。
+
+---
+
+# 三、PC 与 iPhone 的连接方式
+
+## 3.1 不做公网连接
+
+使用场景已经确定：
+
+```text
+PC ───── 同一个路由器/AP ───── iPhone
+```
+
+因此删除公网设计中的：
+
+```text
+UPnP
+PCP
+公网IPv6
+NAT穿透
+端口映射
+```
+
+你提供的 `MSFS-SimGPStoAndroid` 已经实现了 SimConnect → UDP → 手机的数据结构，并且当前 PC 端默认从 SimConnect 获取飞机位置、航向、Pitch、Roll、地速、空速等信息。
+
+我们的项目可以参考其 SimConnect 管理部分，但网络部分简化为纯局域网模式。
+
+## 3.2 iPhone 设置页
+
+首次启动：
+
+```text
+主机地址
+192.168.1.100
+
+控制端口
+36666
+
+服务端口
+36667
+
+[ 测试连接 ]
+
+状态：
+● PC 已连接
+● MSFS 已连接
+延迟 4 ms
+
+[ 保存并进入控制器 ]
+```
+
+IP 自动保存。
+
+以后启动 App：
+
+```text
+自动连接上一次主机
+```
+
+如果失败：
+
+```text
+PC 未连接
+[重新连接]
+[修改主机]
+```
+
+第一版不需要自动扫描局域网。
+
+后续可以增加 Bonjour/mDNS 自动发现，但不作为首版依赖。
+
+---
+
+# 四、为什么使用 UDP + TCP 两条通道
+
+## UDP 36666：实时控制
+
+专门处理：
+
+```text
+Aileron
+Elevator
+Rudder
+Throttle 拖动过程
+实时控制状态
+Ping/Pong
+```
+
+陀螺仪控制属于持续状态：
+
+```text
+旧数据丢失
+      ↓
+不应该等待重传
+      ↓
+直接使用更新的数据
+```
+
+所以 UDP 更适合。
+
+---
+
+## TCP 36667：可靠状态与命令
+
+负责：
+
+```text
+建立会话
+设备认证
+连接状态
+
+Flaps +
+Flaps -
+Trim
+Gear
+Parking Brake
+
+飞机状态
+航线
+航点
+设置
+错误信息
+```
+
+例如：
+
+```text
+用户点击 FLAPS+
+        ↓
+TCP Command #138
+        ↓
+PC
+        ↓
+SimConnect
+        ↓
+MSFS
+        ↓
+实际襟翼状态
+        ↓
+PC
+        ↓
+iPhone
+```
+
+不会因为一个 UDP 包丢失导致用户明明按了襟翼却没有动作。
+
+---
+
+# 五、控制数据频率
+
+建议：
+
+```text
+CoreMotion：
+
+100 Hz 采样
+
+
+iPhone → PC：
+
+60 Hz 默认
+100 Hz 高刷新模式
+
+
+PC → MSFS：
+
+每个模拟帧应用最新控制状态
+
+
+MSFS → PC：
+
+SIM_FRAME 获取
+
+
+PC → iPhone Telemetry：
+
+10～20 Hz
+
+
+地图轨迹：
+
+约 1 Hz / 按距离变化采样
+```
+
+你提供的项目已经使用 `SIMCONNECT_PERIOD_SIM_FRAME` 按模拟帧读取用户飞机信息。
+
+因此我们的 Windows 程序可以继续采用：
+
+```text
+SimConnect thread
+      ↓
+SIM_FRAME
+      ↓
+读取最新 iPhone ControllerState
+      ↓
+写入飞控
+      ↓
+读取飞机状态
+```
+
+避免 UDP 网络线程直接操作 SimConnect。
+
+---
+
+# 六、iPhone 姿态控制
+
+这是整个 App 的核心。
+
+不要直接使用未经处理的原始 gyroscope rotation rate。
+
+使用：
+
+```text
+CoreMotion
+   ↓
+CMDeviceMotion
+   ↓
+CMAttitude / Quaternion
+```
+
+Apple 的 `CMDeviceMotion` 提供经过系统融合的设备姿态信息，`CMAttitude` 可以得到 roll、pitch、yaw、rotation matrix 和 quaternion。
+
+## 6.1 控制关系
+
+本文统一术语：
+
+```text
+iPhone 左右倾斜
+      ↓
+Aileron
+      ↓
+飞机 Roll
+
+
+iPhone 前后倾斜
+      ↓
+Elevator
+      ↓
+飞机 Pitch
+```
+
+真正的 Rudder / Yaw 单独由屏幕控制。
+
+---
+
+# 七、姿态零点设计
+
+不能要求用户每次都把手机保持绝对水平。
+
+点击：
+
+```text
+RECENTER
+```
+
+时记录：
+
+```text
+neutralAttitude = currentAttitude
+```
+
+之后控制依据：
+
+```text
+relativeAttitude
+=
+currentAttitude × inverse(neutralAttitude)
+```
+
+这样用户可以：
+
+```text
+坐着
+躺着
+手机微微倾斜
+改变握持姿势
+```
+
+然后重新按一次 RECENTER。
+
+当前姿态立即成为：
+
+```text
+Aileron  = 0
+Elevator = 0
+```
+
+Core Motion 本身支持获得相对姿态变化，因此适合这种“当前姿势作为控制中心”的实现。
+
+---
+
+# 八、姿态映射
+
+第一版默认参数：
+
+```text
+Roll 最大角度：
+±30°
+
+Pitch 最大角度：
+±20°
+
+Dead Zone：
+2°
+
+Expo：
+1.4
+
+Smoothing：
+开启
+```
+
+例如 Roll：
+
+```text
+-30°                       +30°
+ │                           │
+-100%           0           +100%
+ │             │              │
+左满副翼       中立          右满副翼
+```
+
+Pitch：
+
+```text
+-20°          0          +20°
+ │            │            │
+-100%         0          +100%
+```
+
+实际输出：
+
+```text
+normalized = -1.0 ～ +1.0
+
+↓
+
+-16383 ～ +16384
+```
+
+MSFS 官方的 `AXIS_AILERONS_SET` 和 `AXIS_ELEVATOR_SET` 正是使用这一整数轴范围。
+
+---
+
+# 九、Deadzone + Expo
+
+不要简单线性映射。
+
+否则手机只动一点：
+
+```text
+2°
+3°
+4°
+```
+
+飞机都会跟着不停晃。
+
+推荐曲线：
+
+```text
+2°以内
+    ↓
+0
+
+超过Deadzone
+    ↓
+归一化
+    ↓
+Expo
+    ↓
+平滑
+    ↓
+MSFS
+```
+
+大致手感：
+
+```text
+手机角度        飞控输出
+
+0°              0%
+2°              0%
+5°              5～10%
+10°             20～30%
+15°             40～50%
+20°             65～75%
+30°             100%
+```
+
+因此：
+
+小动作适合巡航微调，
+
+大动作仍然可以快速打满舵面。
+
+设置页允许分别调整：
+
+```text
+Roll Sensitivity
+Pitch Sensitivity
+
+Roll Max Angle
+Pitch Max Angle
+
+Deadzone
+Expo
+Smoothing
+
+Invert Roll
+Invert Pitch
+```
+
+---
+
+# 十、Gyro ARM 机制
+
+首页不能启动后马上控制飞机。
+
+必须有：
+
+```text
+GYRO
+
+[ DISARMED ]
+```
+
+点击后：
+
+```text
+自动执行一次 RECENTER
+       ↓
+GYRO ARMED
+```
+
+显示：
+
+```text
+● GYRO ARMED
+```
+
+再次点击：
+
+```text
+DISARM
+```
+
+立即：
+
+```text
+Aileron  = 0
+Elevator = 0
+```
+
+同时触发轻微触觉反馈。
+
+---
+
+# 十一、切换到地图时自动 DISARM
+
+这是非常重要的行为。
+
+用户进入：
+
+```text
+地图 Tab
+```
+
+意味着手机很可能会被拿起来、转动或者调整位置。
+
+因此：
+
+```text
+Control → Map
+
+自动：
+
+GYRO DISARM
+Aileron → 0
+Elevator → 0
+Rudder → 0
+```
+
+回到：
+
+```text
+Map → Control
+```
+
+不自动重新 ARM。
+
+需要用户：
+
+```text
+点击 ARM
+```
+
+重新校准之后才继续飞行。
+
+这样不会因为查看地图导致飞机突然转弯。
+
+---
+
+# 十二、控制首页设计
+
+整个 App 第一版固定为：
+
+**横屏 Landscape**
+
+主页就是控制器，不显示飞机画面、不显示复杂仪表。
+
+布局：
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ ● PC    ● MSFS      4ms       GYRO ● ARMED             │
+├────────────┬─────────────────────────┬──────────────────┤
+│            │                         │                  │
+│ THROTTLE   │                         │      TRIM        │
+│            │        GYRO             │                  │
+│ 100 ┃      │                         │        ▲         │
+│     ┃ █    │      Roll  -4%          │        │         │
+│     ┃ █    │      Pitch +8%          │      +1.8°       │
+│  50 ┃ █    │                         │        │         │
+│     ┃ █    │          ●              │        ▼         │
+│     ┃ █    │                         │                  │
+│   0 ┃ █    │                         │                  │
+│            │                         │                  │
+│    63%     │ [RECENTER] [GYRO ARM]  │                  │
+├────────────┴─────────────────────────┴──────────────────┤
+│                                                       │
+│                  RUDDER                               │
+│         LEFT ────────●──────── RIGHT                 │
+│                                                       │
+├───────────────────────────────────────────────────────┤
+│ [BRAKE]  [FLAPS -]   FLAPS 10°   [FLAPS +]  [GEAR]  │
+└───────────────────────────────────────────────────────┘
+```
+
+首页只显示与控制直接相关的信息。
+
+不显示：
+
+```text
+人工地平仪
+高度表
+速度表
+驾驶舱画面
+游戏画面
+```
+
+避免把它做成第二块仪表盘。
+
+---
+
+# 十三、油门控制
+
+左侧：
+
+```text
+THROTTLE
+
+100%
+ │
+ █
+ █
+ █
+ █
+ █
+ │
+ 0%
+```
+
+手指上下拖动。
+
+输出：
+
+```text
+0.0 ～ 1.0
+        ↓
+0 ～ 16383
+```
+
+MSFS 2020 提供 `AXIS_THROTTLE_SET`，标准油门输入范围为 0～16383。
+
+## 一个重要设计
+
+**油门不能每秒 60 次永久覆盖。**
+
+因为以后如果飞机存在：
+
+```text
+Autothrottle
+自动油门
+```
+
+持续发送：
+
+```text
+THROTTLE 60%
+THROTTLE 60%
+THROTTLE 60%
+...
+```
+
+会不断和飞机本身抢控制。
+
+因此：
+
+```text
+用户正在拖油门
+        ↓
+持续发送 throttle
+
+用户松手
+        ↓
+停止主动写入 throttle
+
+MSFS
+        ↓
+返回真实 throttle 状态
+        ↓
+更新 iPhone UI
+```
+
+也就是说：
+
+**触摸期间控制，松手以后由 MSFS 状态接管。**
+
+---
+
+# 十四、Trim 设计
+
+Trim 不采用普通绝对 Slider。
+
+建议右侧做：
+
+```text
+        ▲
+        │
+      NOSE UP
+        │
+      +1.8°
+        │
+      NOSE DN
+        │
+        ▼
+```
+
+使用类似实体 Trim Wheel 的操作方式。
+
+向上滑：
+
+```text
+ELEV_TRIM_UP
+```
+
+向下滑：
+
+```text
+ELEV_TRIM_DN
+```
+
+发送增量命令。
+
+然后：
+
+```text
+MSFS实际Trim
+      ↓
+PC读取
+      ↓
+iPhone
+      ↓
+显示 +1.8°
+```
+
+MSFS 也提供绝对 `AXIS_ELEV_TRIM_SET`，但首版使用增量控制更适合和自动驾驶等其他系统共同工作。标准 Elevator Trim 事件由 MSFS 飞控事件接口提供。
+
+---
+
+# 十五、Flaps
+
+底部：
+
+```text
+[ FLAPS - ]     FLAPS 10°      [ FLAPS + ]
+```
+
+不要使用：
+
+```text
+0%
+25%
+50%
+75%
+100%
+```
+
+这种固定档位。
+
+因为不同飞机襟翼档位不同。
+
+使用：
+
+```text
+FLAPS_DECR
+FLAPS_INCR
+```
+
+MSFS 自己决定：
+
+```text
+当前档
+↓
+下一档
+```
+
+PC 再读取真实襟翼位置返回手机。
+
+因此 C172、A320 等飞机不需要分别设计不同 Slider。
+
+---
+
+# 十六、Rudder
+
+真正的 Rudder 不使用手机旋转 Yaw。
+
+否则：
+
+```text
+Roll
+Pitch
+Yaw
+```
+
+全部依赖手机姿态会很难操作。
+
+主页底部：
+
+```text
+RUDDER
+
+LEFT ─────────●───────── RIGHT
+```
+
+这是一个**自动回中的 Slider**。
+
+拖动：
+
+```text
+左
+↓
+-16383
+
+中间
+↓
+0
+
+右
+↓
++16383
+```
+
+释放：
+
+```text
+自动回到 0
+```
+
+MSFS 提供 `AXIS_RUDDER_SET` 标准模拟方向舵输入。
+
+---
+
+# 十七、Brake / Gear
+
+为了让手机真的可以独立操作飞机，第一版建议顺手加入：
+
+```text
+BRAKE
+PARKING BRAKE
+GEAR
+```
+
+但作为辅助按钮，不占用主要操作区域。
+
+例如：
+
+```text
+长按 BRAKE
+↓
+持续刹车
+
+松手
+↓
+释放
+```
+
+Gear：
+
+```text
+[ GEAR ]
+
+UP / DOWN
+```
+
+状态必须来自 MSFS 回读，而不是手机自己猜测。
+
+---
+
+# 十八、PC → iPhone 状态同步原则
+
+所有控件均遵循：
+
+```text
+用户操作
+   ↓
+iPhone Command
+   ↓
+Windows
+   ↓
+SimConnect
+   ↓
+MSFS
+   ↓
+真实状态
+   ↓
+Windows
+   ↓
+iPhone UI
+```
+
+而不是：
+
+```text
+用户点击 FLAPS+
+↓
+iPhone 自己显示 FLAPS 10°
+```
+
+这样即使：
+
+```text
+MSFS拒绝命令
+飞机系统改变状态
+自动驾驶改变Trim
+自动油门改变Throttle
+```
+
+iPhone 最终显示的仍然是模拟器真实状态。
+
+---
+
+# 十九、UDP 控制协议
+
+不使用 JSON 发送陀螺仪。
+
+使用固定 Binary Packet。
+
+建议：
+
+```text
+ControlPacket
+{
+    magic        uint32
+    version      uint8
+    flags        uint8
+
+    sequence     uint32
+    timestamp    uint64
+
+    sessionId    uint32
+    axisMask     uint16
+
+    aileron      int16
+    elevator     int16
+    rudder       int16
+
+    throttle     uint16
+}
+```
+
+`axisMask` 非常重要。
+
+例如：
+
+```text
+AILERON   = bit 0
+ELEVATOR  = bit 1
+RUDDER    = bit 2
+THROTTLE  = bit 3
+```
+
+假设：
+
+```text
+Gyro = ARMED
+Throttle没有触摸
+Rudder没有触摸
+```
+
+则只发送有效：
+
+```text
+Aileron
+Elevator
+```
+
+PC 不会持续覆盖：
+
+```text
+Throttle
+Rudder
+```
+
+---
+
+# 二十、Sequence 与 Timestamp
+
+UDP 每包包含：
+
+```text
+sequence
+timestamp
+```
+
+例如：
+
+```text
+10231
+10232
+10234
+10235
+```
+
+发现：
+
+```text
+10233
+```
+
+丢了。
+
+不用管。
+
+直接使用：
+
+```text
+10234
+```
+
+如果出现：
+
+```text
+10236
+然后收到
+10235
+```
+
+10235 直接丢弃。
+
+绝不能把旧控制状态重新应用到飞机。
+
+---
+
+# 二十一、断线保护
+
+这是第一版必须实现，不属于后期优化。
+
+## 控制包超时
+
+PC 如果：
+
+```text
+250 ms
+```
+
+没有收到新的实时控制包：
+
+立即：
+
+```text
+GYRO DISARM
+
+Aileron = 0
+Elevator = 0
+Rudder = 0
+```
+
+但是：
+
+```text
+Throttle
+Trim
+Flaps
+Gear
+```
+
+**保持当前状态。**
+
+绝不能断线后：
+
+```text
+Throttle → 0
+```
+
+否则飞行过程中 Wi-Fi 抖一下就会直接收油门。
+
+---
+
+# 二十二、App 后台保护
+
+发生：
+
+```text
+锁屏
+Home
+切换其他App
+系统暂停App
+网络切换
+```
+
+iPhone 立即尽量发送：
+
+```text
+DISARM
+```
+
+PC 如果没有收到也会依靠 250ms Watchdog 自动处理。
+
+再次打开 App：
+
+```text
+DISARMED
+```
+
+必须：
+
+```text
+RECENTER
+ARM
+```
+
+后才能重新飞行。
+
+---
+
+# 二十三、TCP 会话
+
+建立连接：
+
+```text
+iPhone
+   ↓
+HELLO
+{
+ protocolVersion
+ appVersion
+ deviceName
+}
+```
+
+PC：
+
+```text
+WELCOME
+{
+ sessionId
+ serverVersion
+ simConnected
+ aircraftName
+}
+```
+
+之后 UDP Packet 必须携带：
+
+```text
+sessionId
+```
+
+PC 只处理当前有效会话的数据。
+
+这样同一局域网其他机器随便向 36666 发 UDP 数据不会控制飞机。
+
+---
+
+# 二十四、地图 Tab
+
+第二个主要页面：
+
+```text
+CONTROL
+MAP
+SETTINGS
+```
+
+其中：
+
+```text
+CONTROL
+```
+
+为默认首页。
+
+---
+
+# 二十五、地图显示内容
+
+Map 页面：
+
+```text
+┌────────────────────────────────────────────┐
+│ < MAP                C172 · Connected      │
+├────────────────────────────────────────────┤
+│                                            │
+│        WPT1 ●                              │
+│              \                             │
+│               \                            │
+│                ● WPT2                      │
+│                  \                         │
+│                   \                        │
+│                    ✈                      │
+│                    │\                     │
+│                    │ \ ←实际航迹           │
+│                    │                       │
+│                                            │
+├────────────────────────────────────────────┤
+│ LAT  31.123456                             │
+│ LON 121.123456                             │
+│ HDG 273°                                  │
+└────────────────────────────────────────────┘
+```
+
+使用 Apple MapKit。
+
+MapKit for SwiftUI 原生支持 Marker、Annotation 以及 `MapPolyline` 等地图覆盖内容，因此飞机、航线和实际航迹都可以直接绘制。
+
+---
+
+# 二十六、飞机当前位置
+
+PC 读取：
+
+```text
+PLANE LATITUDE
+PLANE LONGITUDE
+PLANE ALTITUDE
+PLANE HEADING DEGREES TRUE
+GPS GROUND SPEED
+AIRSPEED INDICATED
+```
+
+然后：
+
+```text
+10～20Hz
+```
+
+发送给手机。
+
+你提供的参考项目已经读取：
+
+```text
+latitude
+longitude
+altitude
+heading
+pitch
+roll
+gpsGroundSpeed
+indicatedAirspeed
+```
+
+并通过 UDP 推送，因此这部分可以直接参考其 SimConnect 数据定义。
+
+飞机 Marker：
+
+```text
+✈
+```
+
+根据真实 Heading 旋转。
+
+---
+
+# 二十七、实际飞行轨迹
+
+航迹不需要 PC 持久保存。
+
+iPhone 收到位置以后维护：
+
+```text
+TrackPoints[]
+```
+
+例如每：
+
+```text
+1秒
+```
+
+或者飞机移动超过指定距离后保存一个点。
+
+地图绘制：
+
+```text
+MapPolyline(trackPoints)
+```
+
+得到：
+
+```text
+飞机真正飞过的路线
+```
+
+和计划航线分开显示。
+
+新航班开始：
+
+```text
+清除旧 Track
+```
+
+同时提供：
+
+```text
+[清除航迹]
+```
+
+按钮。
+
+---
+
+# 二十八、计划航线
+
+航线部分由 Windows 获取。
+
+SimConnect 提供：
+
+```text
+FlightPlanActivated
+```
+
+系统事件。
+
+当新的 Flight Plan 被激活时，SimConnect 会向客户端返回所激活 Flight Plan 的文件名。
+
+所以 PC：
+
+```text
+FlightPlanActivated
+        ↓
+获取 .PLN 路径
+        ↓
+解析 PLN
+        ↓
+Waypoints[]
+```
+
+得到：
+
+```text
+Waypoint 0
+ICAO
+Latitude
+Longitude
+Altitude
+
+Waypoint 1
+...
+
+Waypoint N
+```
+
+然后 TCP 一次性发送到手机。
+
+---
+
+# 二十九、地图航线数据
+
+例如：
+
+```json
+{
+  "type": "route",
+  "waypoints": [
+    {
+      "index": 0,
+      "ident": "ZBAA",
+      "lat": 40.0801,
+      "lon": 116.5846,
+      "alt": 0
+    },
+    {
+      "index": 1,
+      "ident": "RENOB",
+      "lat": 39.823,
+      "lon": 116.312,
+      "alt": 7200
+    }
+  ]
+}
+```
+
+这里使用 JSON 完全没有问题。
+
+因为航线：
+
+```text
+不需要100Hz
+数据量很小
+只在变化时发送
+```
+
+容易开发和调试比极端优化更重要。
+
+---
+
+# 三十、地图交互
+
+第一版地图保持**只读**。
+
+可以：
+
+```text
+拖动地图
+缩放
+点击飞机
+点击航点
+```
+
+点击航点：
+
+```text
+RENOB
+
+N 39.823000
+E 116.312000
+
+Altitude
+7200 ft
+```
+
+第一版暂时不做：
+
+```text
+地图长按修改航线
+Direct-To
+添加航点
+删除航点
+```
+
+这些可以作为第二阶段功能。
+
+---
+
+# 三十一、Windows 程序界面
+
+PC 程序本身不用复杂。
+
+建议：
+
+```text
+MSFS iPhone Controller
+────────────────────────
+
+MSFS
+● Connected
+
+iPhone
+● Connected
+
+Local IP
+192.168.1.100
+
+UDP
+36666
+
+TCP
+36667
+
+Control Rate
+60 Hz
+
+RTT
+4 ms
+
+Aircraft
+Cessna 172
+
+Flight Plan
+ZBAA → ZSPD
+
+
+[ Start with Windows ]
+
+────────────────────────
+Status: Ready
+```
+
+程序最小化到托盘即可。
+
+---
+
+# 三十二、Windows 软件模块
+
+```text
+Windows/
+│
+├── main.cpp
+│
+├── AppWindow.cpp
+│
+├── SimConnectManager.cpp
+│
+├── SimConnectManager.h
+│
+├── FlightController.cpp
+│
+├── FlightController.h
+│
+├── TelemetryManager.cpp
+│
+├── TelemetryManager.h
+│
+├── FlightPlanManager.cpp
+│
+├── FlightPlanManager.h
+│
+├── UDPServer.cpp
+│
+├── UDPServer.h
+│
+├── TCPServer.cpp
+│
+├── TCPServer.h
+│
+├── Protocol.h
+│
+├── SafetyWatchdog.cpp
+│
+└── SafetyWatchdog.h
+```
+
+继续使用：
+
+```text
+C++
+Win32
+Winsock
+SimConnect SDK
+```
+
+与你提供的参考项目技术栈保持一致。该项目本身也是 C++ Windows 程序，并使用 SimConnect SDK。
+
+---
+
+# 三十三、iPhone 工程结构
+
+```text
+iOS/
+│
+├── App/
+│   └── MSFSControllerApp.swift
+│
+├── Motion/
+│   ├── MotionManager.swift
+│   ├── AttitudeProcessor.swift
+│   └── ControlCurve.swift
+│
+├── Network/
+│   ├── ConnectionManager.swift
+│   ├── UDPController.swift
+│   ├── TCPClient.swift
+│   └── Protocol.swift
+│
+├── Models/
+│   ├── ControllerState.swift
+│   ├── AircraftState.swift
+│   ├── FlightPlan.swift
+│   └── ConnectionState.swift
+│
+├── Views/
+│   ├── ControlView.swift
+│   ├── MapView.swift
+│   ├── SettingsView.swift
+│   └── Components/
+│       ├── ThrottleView.swift
+│       ├── TrimView.swift
+│       ├── RudderView.swift
+│       └── GyroView.swift
+│
+└── Storage/
+    └── SettingsStore.swift
+```
+
+技术栈：
+
+```text
+Swift
+SwiftUI
+CoreMotion
+Network.framework
+MapKit
+CoreHaptics / UIKit Haptics
+```
+
+---
+
+# 三十四、SimConnect 控制模块
+
+Windows 启动以后建立：
+
+```text
+SimConnect_Open()
+```
+
+然后映射：
+
+```text
+AXIS_AILERONS_SET
+AXIS_ELEVATOR_SET
+AXIS_RUDDER_SET
+
+AXIS_THROTTLE_SET
+
+ELEV_TRIM_UP
+ELEV_TRIM_DN
+
+FLAPS_INCR
+FLAPS_DECR
+
+GEAR
+BRAKES
+PARKING_BRAKES
+```
+
+标准 MSFS Client Event 可以通过 `SimConnect_MapClientEventToSimEvent` 映射，再通过 SimConnect 的事件传输 API发送给模拟器。
+
+---
+
+# 三十五、线程模型
+
+Windows：
+
+```text
+UI Thread
+
+SimConnect Thread
+│
+├─ receive telemetry
+├─ receive events
+└─ apply controller state
+
+UDP Thread
+│
+└─ latestControllerState
+
+TCP Thread
+│
+├─ commands
+└─ telemetry
+
+Safety Thread
+└─ watchdog
+```
+
+UDP 线程不要直接不停调用 SimConnect。
+
+而是：
+
+```text
+UDP
+↓
+Atomic / Mutex
+↓
+LatestControllerState
+
+SimConnect Thread
+↓
+读取 LatestControllerState
+↓
+发送到 MSFS
+```
+
+这样线程关系非常清楚。
+
+---
+
+# 三十六、数据方向
+
+完整链路：
+
+```text
+                    iPHONE
+
+                CoreMotion 100Hz
+                       │
+                       ▼
+               AttitudeProcessor
+                       │
+                       ▼
+                 ControlCurve
+                       │
+                       ▼
+                 UDP Controller
+                       │
+                       │ 60Hz
+                       ▼
+                    Windows
+                       │
+                       ▼
+               ControllerState
+                       │
+                       ▼
+                  SimConnect
+                       │
+                       ▼
+                  MSFS 2020
+                       │
+                       ▼
+                 Telemetry
+                       │
+                       ▼
+                    TCP
+                       │
+                       ▼
+                    iPhone
+                   /       \
+                  /         \
+           Control State     Map
+```
+
+---
+
+# 三十七、设置页面
+
+第一版 Settings：
+
+```text
+CONNECTION
+
+Host IP
+192.168.1.100
+
+UDP Port
+36666
+
+TCP Port
+36667
+
+[ Test Connection ]
+
+
+GYRO
+
+Roll Sensitivity      100%
+Pitch Sensitivity     100%
+
+Roll Max Angle        30°
+Pitch Max Angle       20°
+
+Deadzone              2°
+Expo                  1.4
+
+Smoothing             ON
+
+Invert Roll           OFF
+Invert Pitch          可设置
+
+
+NETWORK
+
+Control Rate
+
+○ 60 Hz
+○ 100 Hz
+
+
+SAFETY
+
+Disconnect Timeout
+250 ms
+```
+
+普通用户其实基本只需要修改：
+
+```text
+Host IP
+```
+
+其他保持默认。
+
+---
+
+# 三十八、连接状态
+
+顶部始终有：
+
+```text
+● PC
+● SIM
+```
+
+状态：
+
+```text
+● 绿色     正常
+● 黄色     PC连接但MSFS未连接
+● 红色     断开
+```
+
+如果 MSFS 没运行：
+
+```text
+PC ●
+MSFS ○
+
+等待 MSFS...
+```
+
+启动 MSFS 后 PC 自动重新连接 SimConnect。
+
+参考项目本身已经采用循环方式检测并重新建立 SimConnect 连接，因此这个模式可以直接沿用。
+
+---
+
+# 三十九、异常处理
+
+必须考虑：
+
+```text
+Wi-Fi 丢包
+PC程序重启
+MSFS重启
+iPhone锁屏
+iPhone App 被杀
+PC切换网络
+游戏暂停
+航班重新载入
+Flight Plan改变
+```
+
+原则：
+
+```text
+任何异常
+↓
+首先保证飞控不会卡在满舵状态
+```
+
+因此：
+
+```text
+实时控制失联
+↓
+中心化
+
+持久状态
+↓
+保持
+```
+
+也就是：
+
+```text
+Aileron    → CENTER
+Elevator   → CENTER
+Rudder     → CENTER
+
+Throttle   → HOLD
+Trim       → HOLD
+Flaps      → HOLD
+Gear       → HOLD
+```
+
+---
+
+# 四十、第一版不做的功能
+
+为了避免项目开始就过重，V1 明确不做：
+
+```text
+视频串流
+远程桌面
+虚拟Xbox手柄
+公网控制
+NAT穿透
+UPnP
+PCP
+语音
+完整仪表盘
+自动驾驶面板
+COM/NAV面板
+地图编辑航线
+多手机同时控制
+云端账户
+```
+
+---
+
+# 四十一、第二阶段可以增加
+
+V2 再考虑：
+
+```text
+自动发现电脑
+
+多个飞机 Profile
+
+双发动机独立油门
+
+Spoiler
+Mixture
+Propeller
+
+左右独立 Brake
+
+Autopilot Panel
+HDG
+ALT
+VS
+NAV
+APP
+
+COM/NAV Radio
+
+地图 Direct-To
+
+航线编辑
+
+飞行历史保存
+
+多设备：
+iPhone = 飞控
+iPad   = 地图/EFB
+```
+
+---
+
+# 四十二、复杂第三方飞机兼容
+
+第一版以：
+
+```text
+MSFS标准飞机
+标准SimConnect事件
+```
+
+作为主要兼容目标。
+
+如果以后发现某些复杂第三方飞机对：
+
+```text
+Throttle
+Autopilot
+特殊系统
+```
+
+使用自己的事件或变量，则增加：
+
+```text
+Aircraft Profile
+        ↓
+Standard SimConnect
+或
+Custom Event / LVar / H Event
+```
+
+没有必要为了潜在的特殊飞机，从第一版就把架构复杂化。
+
+---
+
+# 四十三、推荐开发顺序
+
+### V0.1 — PC 基础
+
+完成：
+
+```text
+SimConnect连接
+读取飞机位置
+控制Aileron
+控制Elevator
+```
+
+先证明：
+
+```text
+外部程序
+↓
+可以可靠控制MSFS
+```
+
+### V0.2 — iPhone 通信
+
+完成：
+
+```text
+输入PC IP
+TCP连接
+UDP连接
+Ping
+状态显示
+```
+
+### V0.3 — Gyro
+
+完成：
+
+```text
+CoreMotion
+Recenter
+Roll
+Pitch
+Deadzone
+Expo
+ARM/DISARM
+```
+
+到这一步已经可以真正拿手机飞飞机。
+
+### V0.4 — 完整控制
+
+加入：
+
+```text
+Throttle
+Rudder
+Trim
+Flaps
+Brake
+Gear
+```
+
+### V0.5 — 双向状态
+
+加入：
+
+```text
+Throttle反馈
+Trim反馈
+Flaps反馈
+Gear反馈
+Aircraft Name
+```
+
+### V0.6 — Map
+
+加入：
+
+```text
+MapKit
+当前位置
+飞机朝向
+飞行航迹
+经纬度
+```
+
+### V0.7 — Flight Plan
+
+加入：
+
+```text
+FlightPlanActivated
+PLN解析
+航点
+计划航线
+航点详情
+```
+
+### V1.0 — 稳定版本
+
+最后重点测试：
+
+```text
+Wi-Fi断线
+App后台
+PC重启
+MSFS重启
+航班切换
+长时间飞行
+控制延迟
+UDP乱序
+UDP丢包
+Gyro漂移
+不同握持姿势
+```
+
+---
+
+# 四十四、V1 最终功能定义
+
+最终第一版应具备：
+
+| 模块   | 功能                |
+| ---- | ----------------- |
+| 连接   | 手动输入 PC IP        |
+| 连接   | 自动保存上次主机          |
+| 连接   | PC/MSFS 双状态       |
+| 连接   | RTT/Ping          |
+| Gyro | Roll              |
+| Gyro | Pitch             |
+| Gyro | Recenter          |
+| Gyro | ARM/DISARM        |
+| Gyro | Deadzone          |
+| Gyro | Expo              |
+| Gyro | Smoothing         |
+| Gyro | Axis Invert       |
+| 飞控   | Rudder            |
+| 飞控   | Throttle          |
+| 飞控   | Elevator Trim     |
+| 飞控   | Flaps +/-         |
+| 飞控   | Brake             |
+| 飞控   | Gear              |
+| 网络   | UDP 实时控制          |
+| 网络   | TCP 状态与命令         |
+| 安全   | 250ms Watchdog    |
+| 安全   | App 后台自动 Disarm   |
+| 安全   | Map Tab 自动 Disarm |
+| 地图   | 当前飞机位置            |
+| 地图   | 当前经纬度             |
+| 地图   | 飞机 Heading        |
+| 地图   | 实际航迹              |
+| 地图   | 计划航线              |
+| 地图   | 航点                |
+| 地图   | 航点经纬度             |
+| PC   | SimConnect 自动重连   |
+| PC   | 当前飞机名称            |
+| PC   | Flight Plan 自动刷新  |
+
+---
+
+# 四十五、最终产品定位
+
+这套程序最终并不是：
+
+**“iPhone 模拟 Xbox 手柄。”**
+
+而是：
+
+> **一个专门为 Microsoft Flight Simulator 设计的无线 iPhone 飞行控制器。**
+
+iPhone 的职责非常清晰：
+
+```text
+姿态传感器
++
+触控飞控
++
+油门
++
+配平
++
+襟翼
++
+方向舵
++
+简单导航地图
+```
+
+Windows 的职责：
+
+```text
+局域网通信
++
+SimConnect
++
+状态同步
++
+飞行计划解析
++
+安全保护
+```
+
+这套架构第一版足够简单，同时已经把后续扩展到：
+
+```text
+A320
+B737
+多发动机
+自动驾驶
+无线EFB
+iPad第二屏
+```
+
+所需要的基础都预留好了。
+
+**开发时建议直接按这份 V1 规格实现，不需要先做 Xbox/ViGEm 版本。**
+https://github.com/JinShichang/MSFS-SimGPStoAndroid 参考项目

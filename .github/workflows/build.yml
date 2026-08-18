@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (MSVC x64 Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (CMake)
+        run: cmake -S Windows -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSFSiPhoneController-Windows
+          path: build/Release/MSFSiPhoneController.exe
+          if-no-files-found: warn
+
+  ios:
+    name: iOS (Xcode Release)
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List Xcode versions
+        run: ls /Applications | grep -E '^Xcode'
+
+      - name: Select Xcode
+        run: |
+          if [ -d /Applications/Xcode_16.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_16.2.app
+          fi
+          xcodebuild -version
+
+      - name: Build (no signing)
+        run: |
+          xcodebuild \
+            -project iOS/MSFSController.xcodeproj \
+            -scheme MSFSController \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSFSController-iOS
+          path: build/Build/Products/Release-iphoneos/MSFSController.app
+          if-no-files-found: warn
