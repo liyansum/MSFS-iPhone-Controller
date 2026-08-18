@@ -14,6 +14,7 @@
 #include <shellapi.h>
 #include <sstream>
 #include <cstring>
+#include <vector>
 
 #pragma comment(lib, "Iphlpapi.lib")
 
