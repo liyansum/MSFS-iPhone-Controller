@@ -147,15 +147,13 @@ struct SettingsView: View {
         guard !scanning else { return }
         scanning = true
         discovered.removeAll()
-        discovery.start { [weak self] host in
-            guard let self = self else { return }
+        discovery.start { host in
             let existingIps = Set(self.discovered.flatMap { $0.ips })
             let newIps = host.ips.filter { !existingIps.contains($0) }
             guard !newIps.isEmpty else { return }
             self.discovered.append(host)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-            guard let self = self else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
             if self.scanning {
                 self.scanning = false
                 self.discovery.stop()

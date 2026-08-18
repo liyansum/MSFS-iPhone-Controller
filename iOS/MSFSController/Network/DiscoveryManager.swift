@@ -81,12 +81,9 @@ final class DiscoveryManager {
                 lastSend = Date()
             }
 
-            var fds = fd_set()
-            FD_ZERO(&fds)
-            FD_SET(sock, &fds)
-            var tv = timeval(tv_sec: 0, tv_usec: 400_000)
-            let n = select(sock + 1, &fds, nil, nil, &tv)
-            if n > 0 && FD_ISSET(sock, &fds) {
+            var pfd = pollfd(fd: sock, events: Int16(POLLIN), revents: 0)
+            let n = poll(&pfd, 1, 400)
+            if n > 0 && (pfd.revents & POLLIN) != 0 {
                 var from = sockaddr_in()
                 var len = socklen_t(MemoryLayout<sockaddr_in>.size)
                 let r = buf.withUnsafeMutableBytes { ptr -> Int in
