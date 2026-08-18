@@ -65,7 +65,8 @@ struct RootView: View {
                 if newValue != .control { conn.autoDisarm() }
             }
 
-            if conn.phase == .disconnected {
+            // 未连接提示只在 CONTROL 页显示，不遮挡设置/地图页
+            if conn.phase == .disconnected && tab == .control {
                 DisconnectedOverlay(
                     host: settings.hasHost ? settings.host : "",
                     lastError: conn.lastError,
