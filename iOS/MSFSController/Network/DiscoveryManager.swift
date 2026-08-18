@@ -86,10 +86,11 @@ final class DiscoveryManager {
             if n > 0 && (pfd.revents & Int16(POLLIN)) != 0 {
                 var from = sockaddr_in()
                 var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+                let bufCount = buf.count
                 let r = buf.withUnsafeMutableBytes { ptr -> Int in
                     withUnsafeMutablePointer(to: &from) { p in
                         p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                            Int(recvfrom(sock, ptr.baseAddress, buf.count, 0, $0, &len))
+                            Int(recvfrom(sock, ptr.baseAddress, bufCount, 0, $0, &len))
                         }
                     }
                 }
