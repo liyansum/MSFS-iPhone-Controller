@@ -39,9 +39,14 @@ jobs:
 
       - name: Select Xcode
         run: |
-          if [ -d /Applications/Xcode_16.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_16.2.app
-          fi
+          # 优先使用与已安装模拟器运行时匹配的 Xcode，规避 actool 的
+          # "No simulator runtime version" 问题
+          for x in Xcode_16.4.app Xcode_16.3.app Xcode_16.2.app; do
+            if [ -d "/Applications/$x" ]; then
+              sudo xcode-select -s "/Applications/$x"
+              break
+            fi
+          done
           xcodebuild -version
 
       - name: Build (no signing)
