@@ -148,9 +148,8 @@ struct SettingsView: View {
         guard !scanning else { return }
         scanning = true
         discovered.removeAll()
-        discovery.onLog = { [weak self] msg in
-            // DiscoveryManager 是类，闭包可用 weak self 捕获当前视图上下文
-            self?.conn.logDiag(msg)
+        discovery.onLog = { msg in
+            self.conn.logDiag(msg)
         }
         discovery.start { host in
             let existingIps = Set(self.discovered.flatMap { $0.ips })

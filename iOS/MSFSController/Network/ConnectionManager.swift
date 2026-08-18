@@ -76,8 +76,6 @@ final class ConnectionManager: ObservableObject {
                     parts.append("蜂窝数据被拒绝")
                 case .wifiDenied:
                     parts.append("Wi-Fi 被拒绝")
-                case .vpnBlocked:
-                    parts.append("VPN 拦截")
                 @unknown default:
                     break
                 }
