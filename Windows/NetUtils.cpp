@@ -10,6 +10,7 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <windows.h>
+#include <algorithm>
 #include <vector>
 
 #pragma comment(lib, "Iphlpapi.lib")
@@ -87,6 +88,17 @@ std::string RecommendLocalIp() {
 
 std::vector<std::string> LocalIpList() {
     std::vector<std::string> ips;
-    for (const auto& a : GetLocalIpv4Addresses()) ips.push_back(a.ip);
+    std::vector<NetAddrInfo> addresses = GetLocalIpv4Addresses();
+    std::stable_sort(addresses.begin(), addresses.end(), [](const NetAddrInfo& a, const NetAddrInfo& b) {
+        auto rank = [](const NetAddrInfo& item) {
+            if (!item.virtualAdapter && item.hasGateway) return 0;
+            if (!item.virtualAdapter) return 1;
+            return 2;
+        };
+        return rank(a) < rank(b);
+    });
+    for (const auto& a : addresses) {
+        if (std::find(ips.begin(), ips.end(), a.ip) == ips.end()) ips.push_back(a.ip);
+    }
     return ips;
 }

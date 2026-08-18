@@ -6,6 +6,8 @@
 #include <thread>
 #include <cstdint>
 #include <functional>
+#include <mutex>
+#include <string>
 
 class FlightController;
 class SafetyWatchdog;
@@ -17,9 +19,18 @@ public:
     void Start(uint16_t port, SessionCheck check, FlightController* fc, SafetyWatchdog* wd);
     void Stop();
 
+    // 自动探测状态（供 UI 显示）
+    bool IsControlReady() const { return controlReady_.load(); }
+    bool IsDiscoveryReady() const { return discoveryReady_.load(); }
+    int DiscoveryReplies() const { return discoveryReplies_.load(); }
+    std::string ControlError() const;
+    std::string DiscoveryError() const;
+
 private:
     void ThreadMain(uint16_t port);
     void DiscoveryThread(uint16_t port);
+    void SetControlError(const std::string& msg);
+    void SetDiscoveryError(const std::string& msg);
 
     std::atomic<bool> running_{ false };
     std::thread thread_;
@@ -29,4 +40,12 @@ private:
     SessionCheck check_;
     FlightController* fc_ = nullptr;
     SafetyWatchdog* wd_ = nullptr;
+
+    std::atomic<bool> controlReady_{ false };
+    std::atomic<bool> discoveryReady_{ false };
+    std::atomic<int> discoveryReplies_{ 0 };
+    mutable std::mutex controlErrMtx_;
+    std::string controlError_;
+    mutable std::mutex discoveryErrMtx_;
+    std::string discoveryError_;
 };

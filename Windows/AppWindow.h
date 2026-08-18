@@ -17,6 +17,7 @@ public:
         long long lastControlAgeMs = -1;
         bool watchdogFired = false;
         std::string status;
+        std::string network;
     };
 
     void SetSim(bool v);
@@ -27,6 +28,7 @@ public:
     void SetLastControlAge(long long v);
     void SetWatchdogFired(bool v);
     void SetStatus(const std::string& v);
+    void SetNetwork(const std::string& v);
     Snapshot Take() const;
 
 private:
@@ -45,6 +47,7 @@ private:
     void RefreshUi(HWND hwnd);
     bool StartWithWindows(bool enabled);
     bool IsStartWithWindows();
+    bool RepairFirewall(HWND owner);
 
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 

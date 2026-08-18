@@ -108,7 +108,8 @@ final class DiscoveryManager {
                 }
                 if r > 0 {
                     replyCount += 1
-                    handleReply(Data(buf[0..<r]))
+                    let sourceIP = inet_ntoa(from.sin_addr).map { String(cString: $0) }
+                    handleReply(Data(buf[0..<r]), sourceIP: sourceIP)
                 }
             }
         }
@@ -140,10 +141,16 @@ final class DiscoveryManager {
         }
     }
 
-    private func handleReply(_ data: Data) {
+    private func handleReply(_ data: Data, sourceIP: String?) {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               obj["type"] as? String == TcpMsg.hostDiscovery,
-              let ips = obj["ips"] as? [String], !ips.isEmpty else { return }
+              let advertisedIPs = obj["ips"] as? [String], !advertisedIPs.isEmpty else { return }
+
+        // 应答包的来源地址一定是手机当前可达的那张 Windows 网卡；多网卡机器上
+        // 不应盲选服务器枚举出的第一个地址（它可能属于 VPN/虚拟交换机）。
+        var ips: [String] = []
+        if let sourceIP, !sourceIP.isEmpty { ips.append(sourceIP) }
+        for ip in advertisedIPs where !ips.contains(ip) { ips.append(ip) }
 
         let host = Host(name: obj["name"] as? String ?? "",
                         ips: ips,

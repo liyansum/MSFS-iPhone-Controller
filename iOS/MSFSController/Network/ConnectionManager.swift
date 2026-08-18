@@ -149,8 +149,9 @@ final class ConnectionManager: ObservableObject {
     /// 设置页测试连接：成功/失败通过 completion 回调
     func testConnection(host: String, udpPort: UInt16, tcpPort: UInt16,
                         completion: @escaping (Bool, String) -> Void) {
-        connect(host: host, udpPort: udpPort, tcpPort: tcpPort)
+        // 先登记回调，避免极快的本地连接在赋值前就收到 WELCOME。
         pendingTestCompletion = completion
+        connect(host: host, udpPort: udpPort, tcpPort: tcpPort)
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self = self else { return }
             if let comp = self.pendingTestCompletion {
@@ -272,7 +273,12 @@ final class ConnectionManager: ObservableObject {
 
         switch type {
         case TcpMsg.welcome:
-            let sid = obj["sessionId"] as? UInt32 ?? 0
+            let sid = (obj["sessionId"] as? NSNumber)?.uint32Value ?? 0
+            guard sid != 0 else {
+                logDiag("welcome 缺少有效 sessionId")
+                onMain { [self] in lastError = "PC 返回了无效会话" }
+                return
+            }
             engine.setSession(sid)
             let sim = obj["simConnected"] as? Bool ?? false
             let name = obj["aircraftName"] as? String ?? ""

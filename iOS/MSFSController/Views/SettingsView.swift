@@ -10,7 +10,9 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
 
-    private let discovery = DiscoveryManager()
+    // SwiftUI 会频繁重建 View 值；探测器必须由 State 持有，否则第一次状态刷新时
+    // 旧实例会析构并关闭 socket，表现为只发出请求却收不到 Windows 应答。
+    @State private var discovery = DiscoveryManager()
     @State private var discovered: [DiscoveryManager.Host] = []
     @State private var scanning = false
 

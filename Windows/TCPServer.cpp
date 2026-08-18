@@ -70,6 +70,16 @@ std::string BuildError(int code, const std::string& message) {
 
 } // namespace
 
+std::string TCPServer::LastError() const {
+    std::lock_guard<std::mutex> lock(errorMtx_);
+    return lastError_;
+}
+
+void TCPServer::SetError(const std::string& message) {
+    std::lock_guard<std::mutex> lock(errorMtx_);
+    lastError_ = message;
+}
+
 void TCPServer::Start(uint16_t port, SimConnectManager* sim, FlightController* fc,
                       FlightPlanManager* fp, StatusGetter status) {
     sim_ = sim;
@@ -77,6 +87,8 @@ void TCPServer::Start(uint16_t port, SimConnectManager* sim, FlightController* f
     fp_ = fp;
     status_ = std::move(status);
     if (started_.load()) return;
+    SetError("");
+    ready_ = false;
     started_ = true;
     running_ = true;
     thread_ = std::thread(&TCPServer::AcceptLoop, this, port);
@@ -84,8 +96,10 @@ void TCPServer::Start(uint16_t port, SimConnectManager* sim, FlightController* f
 
 void TCPServer::Stop() {
     running_ = false;
+    ready_ = false;
     SOCKET l = (SOCKET)listenSock_.exchange(0);
-    if (l != INVALID_SOCKET) closesocket(l);
+    if (l != 0 && l != INVALID_SOCKET) closesocket(l);
+    if (thread_.joinable()) thread_.join();
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
         if (clientSock_ != INVALID_SOCKET) {
@@ -93,12 +107,15 @@ void TCPServer::Stop() {
             clientSock_ = INVALID_SOCKET;
         }
     }
-    if (thread_.joinable()) thread_.join();
+    if (clientThread_.joinable()) clientThread_.join();
 }
 
 void TCPServer::AcceptLoop(uint16_t port) {
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSock == INVALID_SOCKET) return;
+    if (listenSock == INVALID_SOCKET) {
+        SetError("TCP socket failed: " + std::to_string(WSAGetLastError()));
+        return;
+    }
 
     BOOL reuse = TRUE;
     setsockopt(listenSock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
@@ -109,10 +126,13 @@ void TCPServer::AcceptLoop(uint16_t port) {
     addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(listenSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR ||
         listen(listenSock, 2) == SOCKET_ERROR) {
+        SetError("TCP bind/listen failed on port " + std::to_string(port) +
+                 ": " + std::to_string(WSAGetLastError()));
         closesocket(listenSock);
         return;
     }
     listenSock_.store((unsigned long long)listenSock);
+    ready_ = true;
 
     while (running_.load()) {
         sockaddr_storage from{};
@@ -123,26 +143,31 @@ void TCPServer::AcceptLoop(uint16_t port) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
+        if (!running_.load()) {
+            closesocket(client);
+            break;
+        }
         // 第一版单客户端：已有连接则拒绝新连接
         if (clientActive_.load()) {
-            SendAll(client, BuildError(2, "already connected"));
+            SendLine(client, BuildError(2, "already connected"));
             closesocket(client);
             continue;
         }
-        std::thread([this, client] { HandleClient(client); }).detach();
+        if (clientThread_.joinable()) clientThread_.join();
+        {
+            std::lock_guard<std::mutex> lock(sendMtx_);
+            clientSock_ = client;
+        }
+        clientActive_ = true;
+        clientThread_ = std::thread([this, client] { HandleClient(client); });
     }
 
-    closesocket(listenSock);
-    listenSock_.store(0);
+    SOCKET owned = (SOCKET)listenSock_.exchange(0);
+    if (owned == listenSock) closesocket(listenSock);
+    ready_ = false;
 }
 
 void TCPServer::HandleClient(SOCKET client) {
-    {
-        std::lock_guard<std::mutex> lock(sendMtx_);
-        clientSock_ = client;
-    }
-    clientActive_ = true;
-
     std::string buffer;
     char buf[4096];
     while (running_.load()) {
@@ -161,18 +186,22 @@ void TCPServer::HandleClient(SOCKET client) {
 
     clientActive_ = false;
     sessionId_ = 0;
+    bool ownsSocket = false;
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
-        if (clientSock_ == client) clientSock_ = INVALID_SOCKET;
+        if (clientSock_ == client) {
+            clientSock_ = INVALID_SOCKET;
+            ownsSocket = true;
+        }
     }
-    closesocket(client);
+    if (ownsSocket) closesocket(client);
 }
 
 void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
     bool ok = false;
     Json j = Json::parse(line, ok);
     if (!ok || !j.isObject()) {
-        SendAll(client, BuildError(1, "invalid json"));
+        SendResponse(client, BuildError(1, "invalid json"));
         return;
     }
     std::string type = j.str("type");
@@ -186,7 +215,7 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
             sim = p.first;
             aircraft = p.second;
         }
-        SendAll(client, BuildWelcome(sid, sim, aircraft));
+        SendResponse(client, BuildWelcome(sid, sim, aircraft));
         return;
     }
     if (type == proto::kMsgCmd) {
@@ -200,10 +229,10 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
         else if (name == proto::kCmdParking) sim_->EnqueueCommand(kEvParking);
         else if (name == proto::kCmdBrake)
             sim_->EnqueueCommand(j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease);
-        else SendAll(client, BuildError(3, "unknown command: " + name));
+        else SendResponse(client, BuildError(3, "unknown command: " + name));
         return;
     }
-    SendAll(client, BuildError(4, "unknown message type"));
+    SendResponse(client, BuildError(4, "unknown message type"));
 }
 
 bool TCPServer::SendAll(SOCKET s, const std::string& data) {
@@ -216,11 +245,21 @@ bool TCPServer::SendAll(SOCKET s, const std::string& data) {
     return true;
 }
 
+bool TCPServer::SendLine(SOCKET s, const std::string& data) {
+    return SendAll(s, data + "\n");
+}
+
+bool TCPServer::SendResponse(SOCKET client, const std::string& data) {
+    std::lock_guard<std::mutex> lock(sendMtx_);
+    if (clientSock_ != client) return false;
+    return SendLine(client, data);
+}
+
 void TCPServer::SendToClient(const std::string& json) {
     if (!clientActive_.load()) return;
     std::lock_guard<std::mutex> lock(sendMtx_);
     if (clientSock_ == INVALID_SOCKET) return;
-    SendAll(clientSock_, json + "\n");
+    SendLine(clientSock_, json);
 }
 
 void TCPServer::SendStatus(bool simConnected, const std::string& aircraft) {

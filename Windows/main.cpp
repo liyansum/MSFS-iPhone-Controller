@@ -98,6 +98,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
             bool phone = tcp.SessionId() != 0;
             status.SetIphone(phone);
 
+            if (tcp.IsReady() && udp.IsControlReady() && udp.IsDiscoveryReady()) {
+                status.SetNetwork("Listening (TCP 36667 / UDP 36666,36668), discovery replies: " +
+                                  std::to_string(udp.DiscoveryReplies()));
+            } else {
+                std::string error;
+                auto appendError = [&](const std::string& value) {
+                    if (value.empty()) return;
+                    if (!error.empty()) error += " | ";
+                    error += value;
+                };
+                appendError(tcp.LastError());
+                appendError(udp.ControlError());
+                appendError(udp.DiscoveryError());
+                status.SetNetwork(error.empty() ? "Starting listeners..." : "ERROR: " + error);
+            }
+
             long long last = watchdog.LastControlMs();
             if (last > 0) {
                 status.SetLastControlAge(NowMs() - last);

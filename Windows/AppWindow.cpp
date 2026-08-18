@@ -30,11 +30,13 @@ enum {
     IDC_VAL_IPLIST,
     IDC_VAL_UDP,
     IDC_VAL_TCP,
+    IDC_VAL_NETWORK,
     IDC_VAL_RATE,
     IDC_VAL_RTT,
     IDC_VAL_AIRCRAFT,
     IDC_VAL_FP,
     IDC_CHK_STARTUP,
+    IDC_BTN_FIREWALL,
     IDC_VAL_STATUS,
 };
 
@@ -76,6 +78,7 @@ void StatusStore::SetControlRate(int v) { std::lock_guard<std::mutex> l(mtx_); s
 void StatusStore::SetLastControlAge(long long v) { std::lock_guard<std::mutex> l(mtx_); snap_.lastControlAgeMs = v; }
 void StatusStore::SetWatchdogFired(bool v) { std::lock_guard<std::mutex> l(mtx_); snap_.watchdogFired = v; }
 void StatusStore::SetStatus(const std::string& v) { std::lock_guard<std::mutex> l(mtx_); snap_.status = v; }
+void StatusStore::SetNetwork(const std::string& v) { std::lock_guard<std::mutex> l(mtx_); snap_.network = v; }
 
 StatusStore::Snapshot StatusStore::Take() const {
     std::lock_guard<std::mutex> l(mtx_);
@@ -101,7 +104,7 @@ bool AppWindow::Create(HINSTANCE inst, StatusStore* status) {
 
     hwnd_ = CreateWindowExW(0, L"MSFSiPhoneControllerWnd", L"MSFS iPhone Controller",
                             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                            CW_USEDEFAULT, CW_USEDEFAULT, 620, 470,
+                            CW_USEDEFAULT, CW_USEDEFAULT, 700, 530,
                             nullptr, nullptr, inst, nullptr);
     return hwnd_ != nullptr;
 }
@@ -154,6 +157,54 @@ bool AppWindow::IsStartWithWindows() {
     return exists;
 }
 
+bool AppWindow::RepairFirewall(HWND owner) {
+    wchar_t exePath[32768]{};
+    DWORD length = GetModuleFileNameW(nullptr, exePath, 32768);
+    if (length == 0 || length >= 32768) {
+        MessageBoxW(owner, L"无法读取当前程序路径。", L"防火墙修复失败", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    // 规则只允许同一子网访问当前 exe，且只作用于 Windows“专用”网络。
+    std::wstring params =
+        L"advfirewall firewall add rule name=\"MSFS iPhone Controller (Private LAN)\" "
+        L"dir=in action=allow enable=yes profile=private remoteip=LocalSubnet program=\"";
+    params += exePath;
+    params += L"\"";
+
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.hwnd = owner;
+    info.lpVerb = L"runas";
+    info.lpFile = L"netsh.exe";
+    info.lpParameters = params.c_str();
+    info.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&info)) {
+        if (GetLastError() != ERROR_CANCELLED) {
+            MessageBoxW(owner, L"无法启动 Windows 防火墙配置工具。", L"防火墙修复失败",
+                        MB_OK | MB_ICONERROR);
+        }
+        return false;
+    }
+
+    WaitForSingleObject(info.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(info.hProcess, &exitCode);
+    CloseHandle(info.hProcess);
+    if (exitCode != 0) {
+        MessageBoxW(owner, L"Windows 未能添加防火墙规则。请确认当前网络已设置为“专用网络”。",
+                    L"防火墙修复失败", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    MessageBoxW(owner,
+                L"已允许本程序接收同一专用局域网内的连接。现在请在 iPhone 上重新测试连接。\n\n"
+                L"如果仍无回复，请在 Windows“网络和 Internet”设置中确认当前网络类型为“专用网络”。",
+                L"防火墙已放行", MB_OK | MB_ICONINFORMATION);
+    return true;
+}
+
 void AppWindow::RefreshUi(HWND hwnd) {
     StatusStore::Snapshot s = status_->Take();
 
@@ -173,6 +224,7 @@ void AppWindow::RefreshUi(HWND hwnd) {
     SetDlgItemTextA(hwnd, IDC_VAL_IPLIST, AllLocalIps().c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_UDP, std::to_string(proto::kDefaultUdpPort).c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_TCP, std::to_string(proto::kDefaultTcpPort).c_str());
+    SetDlgItemTextA(hwnd, IDC_VAL_NETWORK, s.network.empty() ? "Starting..." : s.network.c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_RATE, rate.str().c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_RTT, rtt.str().c_str());
     SetDlgItemTextA(hwnd, IDC_VAL_AIRCRAFT, s.aircraft.empty() ? "--" : s.aircraft.c_str());
@@ -220,6 +272,8 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         add(L"", IDC_VAL_UDP, vx, y, vw, 20); y += row;
         add(L"TCP Port:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_TCP, vx, y, vw, 20); y += row;
+        add(L"Network:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
+        add(L"", IDC_VAL_NETWORK, vx, y, vw, 20); y += row;
         add(L"Control Rate:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
         add(L"", IDC_VAL_RATE, vx, y, vw, 20); y += row;
         add(L"Control Age:", IDC_LABEL_TITLE + 0, lx, y, lw, 20);
@@ -234,6 +288,12 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                                    lx, y, 200, 22, hwnd, (HMENU)IDC_CHK_STARTUP, hInst, nullptr);
         SendMessageW(chk, WM_SETFONT, (WPARAM)hNormal, TRUE);
         if (self) SendMessageW(chk, BM_SETCHECK, self->IsStartWithWindows() ? BST_CHECKED : BST_UNCHECKED, 0);
+
+        HWND firewall = CreateWindowExW(0, L"BUTTON", L"Allow iPhone through Firewall",
+                                        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                        300, y - 4, 270, 30, hwnd,
+                                        (HMENU)IDC_BTN_FIREWALL, hInst, nullptr);
+        SendMessageW(firewall, WM_SETFONT, (WPARAM)hNormal, TRUE);
 
         y += 40;
         add(L"Status: Ready", IDC_VAL_STATUS, lx, y, 320, 20);
@@ -296,6 +356,10 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (self) {
                 bool on = SendMessageW((HWND)lParam, BM_GETCHECK, 0, 0) == BST_CHECKED;
                 self->StartWithWindows(on);
+            }
+        } else if (LOWORD(wParam) == IDC_BTN_FIREWALL && HIWORD(wParam) == BN_CLICKED) {
+            if (self && self->RepairFirewall(hwnd) && self->status_) {
+                self->status_->SetStatus("Firewall rule installed; retry the iPhone connection");
             }
         }
         break;
