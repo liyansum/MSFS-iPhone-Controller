@@ -69,9 +69,12 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 {"type":"cmd","name":"trim_dn"}
 {"type":"cmd","name":"parking_brake"}
 {"type":"cmd","name":"brake","value":true}
+{"type":"cmd","name":"autopilot","value":true}
 ```
 
-`brake.value=true` 表示按住刹车，`false` 表示释放。
+`brake.value=true` 表示按住刹车，`false` 表示释放。Windows 按住期间持续刷新左右轮制动。
+`autopilot.value=true` 表示开启自动驾驶总开关，`false` 表示关闭；显示状态以遥测回读为准。
+`flaps_incr/flaps_decr` 在 Windows 端转换为约 5% 的连续增减请求；不支持连续襟翼的机型可吸附到自身合法档位。
 
 ### PC → iPhone
 
@@ -84,10 +87,10 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ```
 
 ```json
-{"type":"telemetry","lat":31.23,"lon":121.47,"alt":1524.0,"altAgl":500.0,"hdg":273.0,"pitch":1.2,"roll":-2.3,"gs":56.7,"ias":61.2,"vs":-3.1,"flaps":10.0,"trim":0.18,"throttle":0.63,"gear":false,"parkingBrake":true,"onGround":false,"seq":42,"aircraft":"Cessna 172"}
+{"type":"telemetry","lat":31.23,"lon":121.47,"alt":1524.0,"altAgl":500.0,"hdg":273.0,"pitch":1.2,"roll":-2.3,"gs":56.7,"ias":61.2,"vs":-3.1,"flaps":10.0,"trim":0.18,"throttle":0.63,"gear":false,"parkingBrake":true,"onGround":false,"autopilot":false,"seq":42,"aircraft":"Cessna 172"}
 ```
 
-遥测字段单位：`alt/altAgl` 英尺，`hdg/pitch/roll` 度，`gs/ias/vs` 米/秒，`flaps` 0..100，`trim` -1..1，`throttle` 0..1。
+遥测字段单位：`alt/altAgl` 英尺，`hdg/pitch/roll` 度，`gs/ias/vs` 米/秒，`flaps` 0..100，`trim` -1..1，`throttle` 0..1，`autopilot` 为自动驾驶总开关状态。
 
 ```json
 {"type":"route","departure":"ZBAA","destination":"ZSPD","waypoints":[{"index":0,"ident":"ZBAA","lat":40.0801,"lon":116.5846,"alt":0},{"index":1,"ident":"RENOB","lat":39.823,"lon":116.312,"alt":7200}]}

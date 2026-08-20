@@ -106,7 +106,7 @@ struct ControlView: View {
     // MARK: - 底部按钮
 
     private var bottomRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             BrakeButton(
                 enabled: conn.simConnected,
                 onPress: { conn.sendCommand(TcpCmd.brake, value: true) },
@@ -115,13 +115,20 @@ struct ControlView: View {
             commandButton("FLAPS -", systemImage: "chevron.down") { conn.sendCommand(TcpCmd.flapsDecr) }
             Text("FLAPS \(Int(conn.aircraft.flapsPercent))%")
                 .font(.caption.bold())
-                .frame(minWidth: 84)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(minWidth: 70)
             commandButton("FLAPS +", systemImage: "chevron.up") { conn.sendCommand(TcpCmd.flapsIncr) }
             commandButton("GEAR", systemImage: "gearshape.fill") { conn.sendCommand(TcpCmd.gear) }
                 .foregroundColor(conn.aircraft.gearDown ? .green : .orange)
             commandButton(conn.aircraft.parkingBrake ? "PARKED" : "PARKING",
                           systemImage: "hand.raised.fill") { conn.sendCommand(TcpCmd.parkingBrake) }
                 .foregroundColor(conn.aircraft.parkingBrake ? .green : .secondary)
+            commandButton(conn.aircraft.autopilot ? "AP ON" : "AP OFF",
+                          systemImage: "airplane") {
+                conn.setAutopilot(!conn.aircraft.autopilot)
+            }
+            .foregroundColor(conn.aircraft.autopilot ? .green : .secondary)
         }
         .frame(maxWidth: .infinity)
         .disabled(!conn.simConnected)
@@ -133,8 +140,10 @@ struct ControlView: View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.caption.bold())
-                .frame(minWidth: 74)
-                .padding(.vertical, 10)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(minWidth: 58)
+                .padding(.vertical, 8)
         }
         .buttonStyle(.bordered)
     }
@@ -151,11 +160,10 @@ struct BrakeButton: View {
         Text("BRAKE")
             .font(.caption.bold())
             .foregroundColor(.white)
-            .frame(minWidth: 74)
-            .padding(.vertical, 10)
+            .frame(minWidth: 58)
+            .padding(.vertical, 8)
             .background(Capsule().fill(pressed ? Color.red : Color(.systemGray)))
             .contentShape(Capsule())
-            .onTapGesture {}
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -174,6 +182,12 @@ struct BrakeButton: View {
             )
             .onChange(of: enabled) { _, value in
                 if !value && pressed {
+                    pressed = false
+                    onRelease()
+                }
+            }
+            .onDisappear {
+                if pressed {
                     pressed = false
                     onRelease()
                 }

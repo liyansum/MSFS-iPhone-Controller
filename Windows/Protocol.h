@@ -74,6 +74,7 @@ constexpr char kCmdTrimUp[]    = "trim_up";
 constexpr char kCmdTrimDn[]    = "trim_dn";
 constexpr char kCmdParking[]   = "parking_brake";
 constexpr char kCmdBrake[]     = "brake";     // 需携带 value(bool)：按住 true / 松开 false
+constexpr char kCmdAutopilot[] = "autopilot"; // 需携带 value(bool)：明确开启 / 关闭
 
 // 自动探测（UDP 36668）
 constexpr char kDiscoveryRequest[]  = "MSFS_DISCOVER";  // iPhone 广播探测

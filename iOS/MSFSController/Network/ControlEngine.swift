@@ -14,9 +14,13 @@ final class ControlEngine {
     private var rawRollDeg: Double = 0
     private var smoothAileron: Float = 0
     private var smoothElevator: Float = 0
+    private var autopilotActive = false
 
     private var throttleDragging = false
     private var throttle: Float = 0
+    // 松手后继续短暂重发最终油门值，直到遥测确认，避免最后一个 UDP 包丢失
+    // 或旧遥测立即把滑杆拉回。
+    private var throttleSettlingUntilMs: UInt64 = 0
     private var rudderDragging = false
     private var rudder: Float = 0
 
@@ -50,7 +54,9 @@ final class ControlEngine {
         rawRollDeg = 0
         smoothAileron = 0
         smoothElevator = 0
+        autopilotActive = false
         throttleDragging = false
+        throttleSettlingUntilMs = 0
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -58,6 +64,11 @@ final class ControlEngine {
 
     func updateRawAngles(pitchDeg: Double, rollDeg: Double) {
         lock.lock(); rawPitchDeg = pitchDeg; rawRollDeg = rollDeg; lock.unlock()
+    }
+
+    /// AP 接管时暂停姿态轴，但保留 ARM 状态；AP 关闭后自动恢复手机姿态控制。
+    func setAutopilotActive(_ active: Bool) {
+        lock.lock(); autopilotActive = active; lock.unlock()
     }
 
     func setArmed(_ v: Bool) {
@@ -73,13 +84,31 @@ final class ControlEngine {
     }
 
     func beginThrottle(_ v: Float) {
-        lock.lock(); throttleDragging = true; throttle = min(max(v, 0), 1); lock.unlock()
+        lock.lock()
+        throttleDragging = true
+        throttleSettlingUntilMs = 0
+        throttle = min(max(v, 0), 1)
+        lock.unlock()
     }
     func setThrottle(_ v: Float) {
         lock.lock(); throttle = min(max(v, 0), 1); lock.unlock()
     }
     func endThrottle() {
-        lock.lock(); throttleDragging = false; lock.unlock()
+        lock.lock()
+        throttleDragging = false
+        throttleSettlingUntilMs = nowMs() + 1_500
+        lock.unlock()
+    }
+
+    /// MSFS 回读到目标油门后停止重发；仅在松手后的确认窗口内生效。
+    func updateTelemetryThrottle(_ value: Float) {
+        lock.lock()
+        if !throttleDragging,
+           throttleSettlingUntilMs != 0,
+           abs(min(max(value, 0), 1) - throttle) <= 0.02 {
+            throttleSettlingUntilMs = 0
+        }
+        lock.unlock()
     }
 
     func beginRudder(_ v: Float) {
@@ -92,11 +121,12 @@ final class ControlEngine {
         lock.lock(); rudderDragging = false; rudder = 0; lock.unlock()
     }
 
-    /// 切页、后台、断线或 MSFS 离线时终止所有瞬时输入。
+    /// 后台、断线或 MSFS 离线时终止所有瞬时输入。
     /// 油门数值保留用于 UI，但不再覆盖模拟器；方向舵立即归零。
     func cancelTransientInputs() {
         lock.lock()
         throttleDragging = false
+        throttleSettlingUntilMs = 0
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -123,8 +153,9 @@ final class ControlEngine {
         var mask: UInt16 = 0
         var ail: Int16 = 0, elev: Int16 = 0, rud: Int16 = 0
         var thr: UInt16 = 0
+        let timestamp = nowMs()
 
-        if armed {
+        if armed && !autopilotActive {
             let s = settings
             let rawAil = ControlCurve.normalized(angle: rawPitchDeg,
                                                  maxAngle: s.rollMaxAngle,
@@ -150,7 +181,12 @@ final class ControlEngine {
             rud = Self.rudderAxis(rudder)
             mask |= Proto.kAxisRudder
         }
-        if throttleDragging {
+        if !throttleDragging,
+           throttleSettlingUntilMs != 0,
+           timestamp >= throttleSettlingUntilMs {
+            throttleSettlingUntilMs = 0
+        }
+        if throttleDragging || throttleSettlingUntilMs != 0 {
             thr = UInt16(min(max(throttle, 0), 1) * Float(Proto.throttleMax))
             mask |= Proto.kAxisThrottle
         }
@@ -159,7 +195,7 @@ final class ControlEngine {
         sequence &+= 1
         return UdpPacket(type: Proto.UdpType.control.rawValue,
                          sequence: sequence,
-                         timestampMs: nowMs(),
+                         timestampMs: timestamp,
                          sessionId: sessionId,
                          axisMask: mask,
                          aileron: ail,

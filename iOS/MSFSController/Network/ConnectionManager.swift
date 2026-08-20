@@ -223,15 +223,10 @@ final class ConnectionManager: ObservableObject {
         }
     }
 
-    // MARK: - 后台 / 切页安全
+    // MARK: - 后台安全
 
     /// App 进入后台时调用：尽量发送回中，解除武装
     func handleBackground() {
-        releaseAllControls(notifyServer: true)
-    }
-
-    /// 切到地图/设置页自动 DISARM
-    func autoDisarm() {
         releaseAllControls(notifyServer: true)
     }
 
@@ -357,6 +352,16 @@ final class ConnectionManager: ObservableObject {
         if let json = Self.encode(obj) { tcp.send(json: json) }
     }
 
+    func setAutopilot(_ enabled: Bool) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        // 先暂停/恢复手机姿态轴，避免 AP 接通瞬间被 60 Hz 轴输入再次断开。
+        engine.setAutopilotActive(enabled)
+        sendCommand(TcpCmd.autopilot, value: enabled)
+    }
+
     // MARK: - TCP
 
     private func sendHello() {
@@ -423,6 +428,8 @@ final class ConnectionManager: ObservableObject {
                     logDiag("丢弃越界遥测坐标: \(state.lat), \(state.lon)")
                     return
                 }
+                engine.updateTelemetryThrottle(Float(state.throttle))
+                engine.setAutopilotActive(state.autopilot)
                 onMain { [self] in
                     aircraft = state
                     hasTelemetry = true

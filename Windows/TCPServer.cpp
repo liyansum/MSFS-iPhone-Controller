@@ -278,6 +278,8 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
         else if (name == proto::kCmdParking) command = kEvParking;
         else if (name == proto::kCmdBrake)
             command = j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease;
+        else if (name == proto::kCmdAutopilot)
+            command = j.boolean("value", false) ? kEvAutopilotOn : kEvAutopilotOff;
         else {
             SendResponse(client, BuildError(3, "unknown command: " + name));
             return;

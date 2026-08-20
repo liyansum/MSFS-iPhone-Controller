@@ -24,6 +24,7 @@ struct AircraftTelemetry {
     bool gearDown = false;
     bool parkingBrake = false;
     bool onGround = false;
+    bool autopilotMaster = false;
     uint64_t seq = 0;
 };
 
@@ -37,6 +38,8 @@ enum SimEventCmd {
     kEvParking,
     kEvBrakeHold,
     kEvBrakeRelease,
+    kEvAutopilotOn,
+    kEvAutopilotOff,
 };
 
 class SimConnectManager {
@@ -78,6 +81,8 @@ private:
     std::string aircraftName_;
     std::atomic<uint64_t> telemetrySeq_{ 0 };
     long long lastTitleRequestMs_ = 0;
+    bool brakeHeld_ = false;
+    long long lastBrakeRefreshMs_ = 0;
 
     struct Cmd { int cmd; int arg0; };
     std::deque<Cmd> cmdQueue_;

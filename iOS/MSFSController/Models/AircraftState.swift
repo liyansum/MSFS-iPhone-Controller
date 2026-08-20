@@ -20,12 +20,13 @@ struct AircraftState: Identifiable, Decodable, Equatable {
     var gearDown: Bool = false
     var parkingBrake: Bool = false
     var onGround: Bool = false
+    var autopilot: Bool = false
     var seq: UInt64 = 0
 
     enum CodingKeys: String, CodingKey {
         case lat, lon, alt, altAgl, hdg, pitch, roll
         case gs, ias, vs, flaps, trim, throttle
-        case gear, parkingBrake, onGround, seq
+        case gear, parkingBrake, onGround, autopilot, seq
     }
 
     init() {}
@@ -49,6 +50,7 @@ struct AircraftState: Identifiable, Decodable, Equatable {
         gearDown = try c.decodeIfPresent(Bool.self, forKey: .gear) ?? false
         parkingBrake = try c.decodeIfPresent(Bool.self, forKey: .parkingBrake) ?? false
         onGround = try c.decodeIfPresent(Bool.self, forKey: .onGround) ?? false
+        autopilot = try c.decodeIfPresent(Bool.self, forKey: .autopilot) ?? false
         seq = try c.decodeIfPresent(UInt64.self, forKey: .seq) ?? 0
     }
 }

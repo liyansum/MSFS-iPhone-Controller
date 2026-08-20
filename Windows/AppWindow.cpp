@@ -172,14 +172,14 @@ void AppWindow::CreateControls(HINSTANCE instance) {
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
         0, 0, 1, 1, hwnd_, reinterpret_cast<HMENU>(IDC_STARTUP), instance, nullptr);
     copyButton_ = CreateWindowExW(0, L"BUTTON", L"复制推荐 IP",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 1, 1, hwnd_, reinterpret_cast<HMENU>(IDC_COPY_IP), instance, nullptr);
     firewallButton_ = CreateWindowExW(0, L"BUTTON", L"一键放行局域网",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 1, 1, hwnd_, reinterpret_cast<HMENU>(IDC_FIREWALL), instance, nullptr);
 
+    SetWindowTheme(startupCheck_, L"DarkMode_Explorer", nullptr);
     for (HWND control : { startupCheck_, copyButton_, firewallButton_ }) {
-        SetWindowTheme(control, L"DarkMode_Explorer", nullptr);
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
     }
     SendMessageW(startupCheck_, BM_SETCHECK, IsStartWithWindows() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -300,6 +300,27 @@ void AppWindow::Paint(HDC dc) {
     RECT ipsRect{ right.left + Scale(18, dpi_), right.bottom - Scale(28, dpi_),
                   right.right - Scale(18, dpi_), right.bottom - Scale(7, dpi_) };
     DrawTextLine(dc, L"所有地址：" + allIps_, ipsRect, subtitleFont_, kMuted);
+}
+
+void AppWindow::DrawOwnerButton(const DRAWITEMSTRUCT& item) {
+    RECT rect = item.rcItem;
+    InflateRect(&rect, -1, -1);
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const COLORREF fill = disabled ? kHeader : (pressed ? RGB(31, 75, 119) : kCard);
+    const COLORREF border = pressed ? kAccent : kCardBorder;
+    FillRound(item.hDC, rect, Scale(9, dpi_), fill, border);
+
+    wchar_t label[128]{};
+    GetWindowTextW(item.hwndItem, label, static_cast<int>(std::size(label)));
+    DrawTextLine(item.hDC, label, rect, bodyFont_, disabled ? kMuted : kText,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    if ((item.itemState & ODS_FOCUS) != 0) {
+        RECT focus = rect;
+        InflateRect(&focus, -Scale(4, dpi_), -Scale(4, dpi_));
+        DrawFocusRect(item.hDC, &focus);
+    }
 }
 
 void AppWindow::RecreateFonts(UINT dpi) {
@@ -503,6 +524,12 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             SetTextColor(dc, kText);
             SetBkColor(dc, kBackground);
             return reinterpret_cast<LRESULT>(self->controlBrush_);
+        }
+        break;
+    case WM_DRAWITEM:
+        if (self && (wParam == IDC_COPY_IP || wParam == IDC_FIREWALL)) {
+            self->DrawOwnerButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+            return TRUE;
         }
         break;
     case WM_COMMAND:

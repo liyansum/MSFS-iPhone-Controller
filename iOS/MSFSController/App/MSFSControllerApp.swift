@@ -18,14 +18,20 @@ struct MSFSControllerApp: App {
                 .environmentObject(settings)
                 .environmentObject(conn)
                 .preferredColorScheme(.dark)
-                .onAppear { forceLandscape() }
+                .onAppear {
+                    forceLandscape()
+                    setScreenAwake(true)
+                }
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
-            case .background, .inactive:
+            case .background:
+                setScreenAwake(false)
+                conn.handleBackground()
+            case .inactive:
                 conn.handleBackground()
             case .active:
-                break
+                setScreenAwake(true)
             @unknown default:
                 break
             }
@@ -38,6 +44,11 @@ struct MSFSControllerApp: App {
                 .compactMap({ $0 as? UIWindowScene }).first else { return }
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
         }
+    }
+
+    /// 飞行控制期间保持屏幕常亮，避免自动锁屏令 CoreMotion/TCP/UDP 被系统挂起。
+    private func setScreenAwake(_ awake: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = awake
     }
 }
 
@@ -80,9 +91,6 @@ struct RootView: View {
                 .tag(RootTab.settings)
         }
         .animation(.easeInOut(duration: 0.2), value: conn.phase)
-        .onChange(of: tab) { _, newValue in
-            if newValue != .control { conn.autoDisarm() }
-        }
         .onAppear {
             if settings.hasHost && conn.phase == .disconnected {
                 conn.connect()

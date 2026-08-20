@@ -36,12 +36,14 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    前/后倾斜只控制升降舵。分别在 Landscape Left/Right 下验证方向一致。
 4. RECENTER 后当前握持姿势应立即成为中立；Deadzone、Expo、Sensitivity、
    Smoothing 与 Invert 设置应即时生效。
-5. 拖动 Rudder 后松手必须回中；拖动 Throttle 时持续控制，松手后停止覆盖并
-   跟随 MSFS 回读。Trim、Flaps、Gear、Parking Brake 状态必须以 MSFS 回读为准。
+5. 拖动 Rudder 后松手必须回中；拖动 Throttle 时持续控制，松手后的确认窗口内
+   不得被旧遥测拉回。Trim、Flaps、Gear、Parking Brake、Autopilot 状态必须以
+   MSFS 回读为准。Flaps± 每次请求约 5%，离散档位机型允许吸附到合法档位。
 6. 按住 Brake 后松手必须释放。按住期间切页、锁屏、断开 TCP 或关闭手机 Wi-Fi，
    刹车必须释放，Aileron/Elevator/Rudder 必须在 250 ms 左右回中，Throttle 保持。
-7. 在 Gyro、Rudder 或 Throttle 活动时切换到 Map/Settings，再回到 Control；
-   App 必须保持 DISARMED，且不能恢复旧拖动值。
+7. GYRO ARM 后切换到 Map/Settings 必须保持 ARM 和姿态控制；Rudder/Brake 等
+   按住型控件离开页面时必须释放。开启 AP 后姿态轴暂停输出，关闭 AP 后自动恢复，
+   不要求重新 ARM。
 8. MSFS 退出或重启时，iPhone 控件应禁用并 DISARM；重连后不得补执行离线期间
    点击的命令，必须重新 ARM 才能恢复姿态控制。
 

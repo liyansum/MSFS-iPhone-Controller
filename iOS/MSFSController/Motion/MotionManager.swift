@@ -70,11 +70,12 @@ final class MotionManager {
 
             if shouldRecenter { self.processor.recenter(with: dm.attitude) }
             let rel = self.processor.relative(attitude: dm.attitude)
-            // CoreMotion 坐标固定在设备上；横屏左右旋转 180° 后两个控制轴都需反号，
-            // 才能维持“向左倾斜=左滚转、抬起上沿=相同俯仰方向”的手感。
+            // CoreMotion 坐标固定在设备上；横屏左右旋转 180° 后两个控制轴都需反号。
+            // 默认手感：左侧低=左滚转、右侧低=右滚转；手机倾角增大=拉起。
+            // elevator 需额外反号以匹配 SimConnect 的 AXIS_ELEVATOR_SET 方向。
             let sign = self.orientation == .landscapeRight ? -1.0 : 1.0
             let aileronAngle = rel.pitchDeg * sign
-            let elevatorAngle = rel.rollDeg * sign
+            let elevatorAngle = -rel.rollDeg * sign
             self.rawAngles.value = (aileronAngle, elevatorAngle)
             self.onAngles?(aileronAngle, elevatorAngle)
             if shouldNotifyReady { onReady?() }

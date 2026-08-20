@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 油门：垂直拖动条 0..100。触摸期间持续发送，松手后由 MSFS 状态接管。
+// 油门：垂直拖动条 0..100。松手后短暂保持目标值，待 MSFS 遥测确认再接管显示。
 
 struct ThrottleView: View {
     let telemetryThrottle: Double   // 0..1（未拖动时显示 MSFS 实际值）
@@ -11,8 +11,12 @@ struct ThrottleView: View {
 
     @State private var dragging = false
     @State private var dragValue: Float = 0
+    @State private var settling = false
+    @State private var settleGeneration: UInt64 = 0
 
-    private var display: Float { dragging ? dragValue : Float(telemetryThrottle) }
+    private var display: Float {
+        dragging || settling ? dragValue : Float(telemetryThrottle)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -52,6 +56,8 @@ struct ThrottleView: View {
                         let val = value(for: v.location.y, height: h)
                         if !dragging {
                             dragging = true
+                            settling = false
+                            settleGeneration &+= 1
                             dragValue = val
                             onBegin(val)
                         } else {
@@ -60,15 +66,31 @@ struct ThrottleView: View {
                         }
                     }
                     .onEnded { _ in
+                        guard dragging else { return }
                         dragging = false
+                        settling = true
+                        settleGeneration &+= 1
+                        let generation = settleGeneration
                         onEnd()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            if settleGeneration == generation { settling = false }
+                        }
                     }
             )
+            .onChange(of: telemetryThrottle) { _, value in
+                if settling && abs(Float(value) - dragValue) <= 0.02 {
+                    settling = false
+                    settleGeneration &+= 1
+                }
+            }
             .onChange(of: enabled) { _, value in
-                if !value && dragging {
+                guard !value else { return }
+                if dragging {
                     dragging = false
                     onEnd()
                 }
+                settling = false
+                settleGeneration &+= 1
             }
             .opacity(enabled ? 1 : 0.5)
         }

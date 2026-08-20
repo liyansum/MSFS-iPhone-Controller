@@ -22,6 +22,11 @@ void TestJsonParserInitializesResult() {
     Check(hello.str("type") == "hello", "HELLO type lost");
     Check(hello.num("protocolVersion", -1) == 1, "protocol version lost");
 
+    Json autopilot = Json::parse(R"({"type":"cmd","name":"autopilot","value":true})", ok);
+    Check(ok && autopilot.str("name") == proto::kCmdAutopilot,
+          "autopilot command was not parsed");
+    Check(autopilot.boolean("value", false), "autopilot boolean value was lost");
+
     Json invalid = Json::parse(R"({"type":)", ok);
     Check(!ok, "invalid JSON accepted");
     Check(invalid.isNull(), "invalid JSON did not return null");

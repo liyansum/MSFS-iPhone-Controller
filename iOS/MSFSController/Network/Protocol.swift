@@ -99,6 +99,7 @@ enum TcpCmd {
     static let trimDn = "trim_dn"
     static let parkingBrake = "parking_brake"
     static let brake = "brake"
+    static let autopilot = "autopilot"
 }
 
 // MARK: - 小端编解码辅助

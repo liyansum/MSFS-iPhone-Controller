@@ -29,7 +29,7 @@ xcodegen generate
 1. 在 iPhone 首次打开 App，进入 SETTINGS 自动发现电脑，或填入 Windows 端显示的推荐 IP。
 2. 点击 `Test Connection`；状态显示 `PC 已连接` / `MSFS 已连接` 后点 `保存并连接`。
 3. 回到 CONTROL 页：点击 `GYRO ARM`（自动执行一次 RECENTER）开始姿态控制。
-4. 地图页自动跟随飞机；切回控制页需要重新 ARM。
+4. 地图页自动跟随飞机；切换 CONTROL / MAP / SETTINGS 会保持当前 GYRO ARM 状态。
 
 断开连接时 CONTROL 页只显示非阻塞状态卡，Tab 栏仍可操作；点击「修改主机」后，
 选择发现到的电脑或点「保存并连接」会使用新地址并自动返回控制页。
@@ -56,8 +56,9 @@ GitHub Actions 产出的 `MSFSController.ipa` 为**未签名**包（`Payload/MSF
 | `Views/` | 控制页 / 地图页 / 设置页 / 组件 |
 | `Storage/` | 设置持久化 |
 
-## 安全行为
+## 屏幕与安全行为
 
-- 切到地图/设置页自动 DISARM；App 进入后台立即尝试发送回中。
+- App 在前台时保持屏幕常亮，避免自动锁屏中断局域网和 CoreMotion 控制。
+- 切到地图/设置页保持 GYRO ARM；App 进入后台或手动锁屏时立即尝试发送回中。
 - 断线保护由 Windows 端 250ms 看门狗兜底。
 - 再次进入 App 必须先 RECENTER + ARM 才能控制。
