@@ -368,7 +368,7 @@ final class ConnectionManager: ObservableObject {
         let obj: [String: Any] = [
             "type": TcpMsg.hello,
             "protocolVersion": Proto.protocolVersion,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1",
             "deviceName": UIDevice.current.name,
         ]
         if let json = Self.encode(obj) { tcp.send(json: json) }
@@ -428,7 +428,6 @@ final class ConnectionManager: ObservableObject {
                     logDiag("丢弃越界遥测坐标: \(state.lat), \(state.lon)")
                     return
                 }
-                engine.updateTelemetryThrottle(Float(state.throttle))
                 engine.setAutopilotActive(state.autopilot)
                 onMain { [self] in
                     aircraft = state

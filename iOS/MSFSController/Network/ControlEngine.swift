@@ -16,11 +16,8 @@ final class ControlEngine {
     private var smoothElevator: Float = 0
     private var autopilotActive = false
 
-    private var throttleDragging = false
+    private var throttleActive = false
     private var throttle: Float = 0
-    // 松手后继续短暂重发最终油门值，直到遥测确认，避免最后一个 UDP 包丢失
-    // 或旧遥测立即把滑杆拉回。
-    private var throttleSettlingUntilMs: UInt64 = 0
     private var rudderDragging = false
     private var rudder: Float = 0
 
@@ -55,8 +52,7 @@ final class ControlEngine {
         smoothAileron = 0
         smoothElevator = 0
         autopilotActive = false
-        throttleDragging = false
-        throttleSettlingUntilMs = 0
+        throttleActive = false
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -85,31 +81,17 @@ final class ControlEngine {
 
     func beginThrottle(_ v: Float) {
         lock.lock()
-        throttleDragging = true
-        throttleSettlingUntilMs = 0
+        throttleActive = true
         throttle = min(max(v, 0), 1)
         lock.unlock()
     }
     func setThrottle(_ v: Float) {
-        lock.lock(); throttle = min(max(v, 0), 1); lock.unlock()
-    }
-    func endThrottle() {
         lock.lock()
-        throttleDragging = false
-        throttleSettlingUntilMs = nowMs() + 1_500
+        throttleActive = true
+        throttle = min(max(v, 0), 1)
         lock.unlock()
     }
-
-    /// MSFS 回读到目标油门后停止重发；仅在松手后的确认窗口内生效。
-    func updateTelemetryThrottle(_ value: Float) {
-        lock.lock()
-        if !throttleDragging,
-           throttleSettlingUntilMs != 0,
-           abs(min(max(value, 0), 1) - throttle) <= 0.02 {
-            throttleSettlingUntilMs = 0
-        }
-        lock.unlock()
-    }
+    func endThrottle() {}
 
     func beginRudder(_ v: Float) {
         lock.lock(); rudderDragging = true; rudder = min(max(v, -1), 1); lock.unlock()
@@ -125,8 +107,7 @@ final class ControlEngine {
     /// 油门数值保留用于 UI，但不再覆盖模拟器；方向舵立即归零。
     func cancelTransientInputs() {
         lock.lock()
-        throttleDragging = false
-        throttleSettlingUntilMs = 0
+        throttleActive = false
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -181,12 +162,9 @@ final class ControlEngine {
             rud = Self.rudderAxis(rudder)
             mask |= Proto.kAxisRudder
         }
-        if !throttleDragging,
-           throttleSettlingUntilMs != 0,
-           timestamp >= throttleSettlingUntilMs {
-            throttleSettlingUntilMs = 0
-        }
-        if throttleDragging || throttleSettlingUntilMs != 0 {
+        // 手机一旦操作油门，就像实体油门轴一样持续占用目标值，直到后台/断线。
+        // 仅在松手后短暂重发会让机模、辅助功能或旧遥测很快覆盖手机输入。
+        if throttleActive {
             thr = UInt16(min(max(throttle, 0), 1) * Float(Proto.throttleMax))
             mask |= Proto.kAxisThrottle
         }

@@ -25,6 +25,8 @@ struct AircraftTelemetry {
     bool parkingBrake = false;
     bool onGround = false;
     bool autopilotMaster = false;
+    double brakeLeft = 0;        // 0..1
+    double brakeRight = 0;       // 0..1
     uint64_t seq = 0;
 };
 
@@ -83,6 +85,8 @@ private:
     long long lastTitleRequestMs_ = 0;
     bool brakeHeld_ = false;
     long long lastBrakeRefreshMs_ = 0;
+    long long brakeReleaseUntilMs_ = 0;
+    bool autopilotMaster_ = false;
 
     struct Cmd { int cmd; int arg0; };
     std::deque<Cmd> cmdQueue_;

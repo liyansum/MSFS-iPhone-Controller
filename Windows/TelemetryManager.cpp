@@ -25,6 +25,8 @@ std::string FormatTelemetry(const AircraftTelemetry& t, const std::string& aircr
        << ",\"parkingBrake\":" << (t.parkingBrake ? "true" : "false")
        << ",\"onGround\":" << (t.onGround ? "true" : "false")
        << ",\"autopilot\":" << (t.autopilotMaster ? "true" : "false")
+       << ",\"brakeLeft\":" << t.brakeLeft
+       << ",\"brakeRight\":" << t.brakeRight
        << ",\"seq\":" << t.seq
        << ",\"aircraft\":\"" << Json::escape(aircraft) << "\"}";
     return os.str();

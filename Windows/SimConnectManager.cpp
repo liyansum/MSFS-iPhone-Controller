@@ -29,8 +29,7 @@ enum : DWORD {
     EV_PARKING,
     EV_BRAKE_LEFT,
     EV_BRAKE_RIGHT,
-    EV_AUTOPILOT_ON,
-    EV_AUTOPILOT_OFF,
+    EV_AUTOPILOT_MASTER,
     EV_FLIGHTPLAN,
     EV_FLIGHTPLAN_DEACTIVATED,
 };
@@ -42,9 +41,9 @@ struct SimData {
     double groundSpeed, indicatedAirspeed, verticalSpeed;
     double flapsPercent, elevatorTrim, throttle;
     double gearDown, parkingBrake, onGround, autopilotMaster;
+    double brakeLeft, brakeRight;
 };
 
-constexpr DWORD kFlapsFineStep = 819; // 16383 的约 5%；机型仍可吸附到自身合法档位
 constexpr DWORD kBrakeFull = 16383;
 constexpr int32_t kBrakeReleased = -16383;
 
@@ -140,6 +139,8 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     data(DEF_PLANE, "BRAKE PARKING INDICATOR", "bool");
     data(DEF_PLANE, "SIM ON GROUND", "bool");
     data(DEF_PLANE, "AUTOPILOT MASTER", "bool");
+    data(DEF_PLANE, "BRAKE LEFT POSITION", "position 32k");
+    data(DEF_PLANE, "BRAKE RIGHT POSITION", "position 32k");
     data(DEF_TITLE, "TITLE", nullptr, SIMCONNECT_DATATYPE_STRING256);
 
     auto map = [&](DWORD id, const char* eventName) {
@@ -150,16 +151,15 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     map(EV_ELEVATOR, "AXIS_ELEVATOR_SET");
     map(EV_RUDDER, "AXIS_RUDDER_SET");
     map(EV_THROTTLE, "AXIS_THROTTLE_SET");
-    map(EV_FLAPS_INCR, "FLAPS_CONTINUOUS_INCR");
-    map(EV_FLAPS_DECR, "FLAPS_CONTINUOUS_DECR");
+    map(EV_FLAPS_INCR, "FLAPS_INCR");
+    map(EV_FLAPS_DECR, "FLAPS_DECR");
     map(EV_GEAR, "GEAR_TOGGLE");
     map(EV_TRIM_UP, "ELEV_TRIM_UP");
     map(EV_TRIM_DN, "ELEV_TRIM_DN");
     map(EV_PARKING, "PARKING_BRAKES");
     map(EV_BRAKE_LEFT, "AXIS_LEFT_BRAKE_SET");
     map(EV_BRAKE_RIGHT, "AXIS_RIGHT_BRAKE_SET");
-    map(EV_AUTOPILOT_ON, "AUTOPILOT_ON");
-    map(EV_AUTOPILOT_OFF, "AUTOPILOT_OFF");
+    map(EV_AUTOPILOT_MASTER, "AP_MASTER");
 
     if (FAILED(SimConnect_SubscribeToSystemEvent(
             h, EV_FLIGHTPLAN, "FlightPlanActivated"))) ok = false;
@@ -182,6 +182,8 @@ void SimConnectManager::HandleConnectionLost() {
     reconnectRequested_ = false;
     brakeHeld_ = false;
     lastBrakeRefreshMs_ = 0;
+    brakeReleaseUntilMs_ = 0;
+    autopilotMaster_ = false;
     const bool wasConnected = simConnected_.exchange(false);
     {
         std::lock_guard<std::mutex> lock(cmdMtx_);
@@ -215,6 +217,7 @@ void SimConnectManager::ThreadMain() {
                 // 防止旧连接中断时刹车轴停在最大值。
                 brakeHeld_ = false;
                 lastBrakeRefreshMs_ = 0;
+                brakeReleaseUntilMs_ = NowMs() + 1000;
                 SendEvent(hSimConnect_, EV_BRAKE_LEFT,
                           static_cast<DWORD>(kBrakeReleased));
                 SendEvent(hSimConnect_, EV_BRAKE_RIGHT,
@@ -244,9 +247,12 @@ void SimConnectManager::ThreadMain() {
             // 部分硬件轴或机模会很快覆盖一次性的刹车事件。按住期间以 20 Hz
             // 刷新左右轮全刹车，松开时再明确发送 SDK 规定的 -16383（0%）。
             const long long now = NowMs();
-            if (brakeHeld_ && now - lastBrakeRefreshMs_ >= 50) {
-                SendEvent(hSimConnect_, EV_BRAKE_LEFT, kBrakeFull);
-                SendEvent(hSimConnect_, EV_BRAKE_RIGHT, kBrakeFull);
+            if ((brakeHeld_ || now < brakeReleaseUntilMs_) &&
+                now - lastBrakeRefreshMs_ >= 50) {
+                const DWORD brakeValue = brakeHeld_
+                    ? kBrakeFull : static_cast<DWORD>(kBrakeReleased);
+                SendEvent(hSimConnect_, EV_BRAKE_LEFT, brakeValue);
+                SendEvent(hSimConnect_, EV_BRAKE_RIGHT, brakeValue);
                 lastBrakeRefreshMs_ = now;
             }
 
@@ -295,32 +301,42 @@ void SimConnectManager::DrainCommands(HANDLE h) {
     }
     for (const Cmd& c : pending) {
         switch (c.cmd) {
-        case kEvFlapsIncr: SendEvent(h, EV_FLAPS_INCR, kFlapsFineStep); break;
-        case kEvFlapsDecr: SendEvent(h, EV_FLAPS_DECR, kFlapsFineStep); break;
+        case kEvFlapsIncr: SendEvent(h, EV_FLAPS_INCR, 0); break;
+        case kEvFlapsDecr: SendEvent(h, EV_FLAPS_DECR, 0); break;
         case kEvGear:      SendEvent(h, EV_GEAR, 1); break;
         case kEvTrimUp:    SendEvent(h, EV_TRIM_UP, 1); break;
         case kEvTrimDn:    SendEvent(h, EV_TRIM_DN, 1); break;
         case kEvParking:   SendEvent(h, EV_PARKING, 1); break;
         case kEvBrakeHold:
             brakeHeld_ = true;
+            brakeReleaseUntilMs_ = 0;
             SendEvent(h, EV_BRAKE_LEFT, kBrakeFull);
             SendEvent(h, EV_BRAKE_RIGHT, kBrakeFull);
             lastBrakeRefreshMs_ = NowMs();
             break;
         case kEvBrakeRelease:
             brakeHeld_ = false;
-            lastBrakeRefreshMs_ = 0;
+            brakeReleaseUntilMs_ = NowMs() + 1000;
             SendEvent(h, EV_BRAKE_LEFT, static_cast<DWORD>(kBrakeReleased));
             SendEvent(h, EV_BRAKE_RIGHT, static_cast<DWORD>(kBrakeReleased));
+            lastBrakeRefreshMs_ = NowMs();
             break;
         case kEvAutopilotOn:
-            // AP 接管前先交还中立操纵面，避免最后一个手机姿态包与 AP 争夺控制。
-            SendEvent(h, EV_AILERON, 0);
-            SendEvent(h, EV_ELEVATOR, 0);
-            SendEvent(h, EV_RUDDER, 0);
-            SendEvent(h, EV_AUTOPILOT_ON, 1);
+            if (!autopilotMaster_) {
+                // AP 接管前先交还中立操纵面，避免最后一个手机姿态包与 AP 争夺控制。
+                SendEvent(h, EV_AILERON, 0);
+                SendEvent(h, EV_ELEVATOR, 0);
+                SendEvent(h, EV_RUDDER, 0);
+                SendEvent(h, EV_AUTOPILOT_MASTER, 0);
+                autopilotMaster_ = true; // 合并同一批队列中的重复 ON，随后由遥测校正
+            }
             break;
-        case kEvAutopilotOff: SendEvent(h, EV_AUTOPILOT_OFF, 0); break;
+        case kEvAutopilotOff:
+            if (autopilotMaster_) {
+                SendEvent(h, EV_AUTOPILOT_MASTER, 0);
+                autopilotMaster_ = false;
+            }
+            break;
         default: break;
         }
     }
@@ -356,6 +372,9 @@ void SimConnectManager::OnDispatch(void* pData) {
             t.parkingBrake = d->parkingBrake > 0.5;
             t.onGround = d->onGround > 0.5;
             t.autopilotMaster = d->autopilotMaster > 0.5;
+            autopilotMaster_ = t.autopilotMaster;
+            t.brakeLeft = std::clamp(d->brakeLeft / 32768.0, 0.0, 1.0);
+            t.brakeRight = std::clamp(d->brakeRight / 32768.0, 0.0, 1.0);
             t.seq = telemetrySeq_.fetch_add(1);
             if (onTelemetry_) onTelemetry_(t);
         } else if (obj->dwDefineID == DEF_TITLE) {

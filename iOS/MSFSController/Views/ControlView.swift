@@ -109,6 +109,7 @@ struct ControlView: View {
         HStack(spacing: 6) {
             BrakeButton(
                 enabled: conn.simConnected,
+                applied: max(conn.aircraft.brakeLeft, conn.aircraft.brakeRight),
                 onPress: { conn.sendCommand(TcpCmd.brake, value: true) },
                 onRelease: { conn.sendCommand(TcpCmd.brake, value: false) }
             )
@@ -152,17 +153,21 @@ struct ControlView: View {
 // 长按保持刹车
 struct BrakeButton: View {
     let enabled: Bool
+    let applied: Double
     let onPress: () -> Void
     let onRelease: () -> Void
     @State private var pressed = false
 
     var body: some View {
-        Text("BRAKE")
+        Text(applied > 0.05 ? "BRAKE \(Int(applied * 100))%" : "BRAKE")
             .font(.caption.bold())
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             .foregroundColor(.white)
             .frame(minWidth: 58)
             .padding(.vertical, 8)
-            .background(Capsule().fill(pressed ? Color.red : Color(.systemGray)))
+            .background(Capsule().fill(pressed ? Color.red :
+                (applied > 0.05 ? Color.orange : Color(.systemGray))))
             .contentShape(Capsule())
             .gesture(
                 DragGesture(minimumDistance: 0)

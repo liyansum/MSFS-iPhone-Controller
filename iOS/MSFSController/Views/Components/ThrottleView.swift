@@ -1,6 +1,6 @@
 import SwiftUI
 
-// 油门：垂直拖动条 0..100。松手后短暂保持目标值，待 MSFS 遥测确认再接管显示。
+// 油门：垂直拖动条 0..100。用户操作后持续保持目标值，直到断线或 App 后台。
 
 struct ThrottleView: View {
     let telemetryThrottle: Double   // 0..1（未拖动时显示 MSFS 实际值）
@@ -11,11 +11,10 @@ struct ThrottleView: View {
 
     @State private var dragging = false
     @State private var dragValue: Float = 0
-    @State private var settling = false
-    @State private var settleGeneration: UInt64 = 0
+    @State private var hasTarget = false
 
     private var display: Float {
-        dragging || settling ? dragValue : Float(telemetryThrottle)
+        hasTarget ? dragValue : Float(telemetryThrottle)
     }
 
     var body: some View {
@@ -26,9 +25,13 @@ struct ThrottleView: View {
                     .fill(Color(.systemGray5))
 
                 VStack {
-                    Text("100")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    HStack {
+                        Text("100")
+                        Spacer()
+                        Text("SIM \(Int(telemetryThrottle * 100))%")
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
                     Spacer()
                     Text("0")
                         .font(.caption2)
@@ -42,7 +45,7 @@ struct ThrottleView: View {
                     .frame(height: max(CGFloat(display) * (h - 16), 8))
                     .padding(.vertical, 8)
 
-                Text("\(Int(display * 100))%")
+                Text("SET \(Int(display * 100))%")
                     .font(.caption.bold())
                     .foregroundColor(.white)
                     .shadow(radius: 2)
@@ -56,8 +59,7 @@ struct ThrottleView: View {
                         let val = value(for: v.location.y, height: h)
                         if !dragging {
                             dragging = true
-                            settling = false
-                            settleGeneration &+= 1
+                            hasTarget = true
                             dragValue = val
                             onBegin(val)
                         } else {
@@ -68,29 +70,16 @@ struct ThrottleView: View {
                     .onEnded { _ in
                         guard dragging else { return }
                         dragging = false
-                        settling = true
-                        settleGeneration &+= 1
-                        let generation = settleGeneration
                         onEnd()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            if settleGeneration == generation { settling = false }
-                        }
                     }
             )
-            .onChange(of: telemetryThrottle) { _, value in
-                if settling && abs(Float(value) - dragValue) <= 0.02 {
-                    settling = false
-                    settleGeneration &+= 1
-                }
-            }
             .onChange(of: enabled) { _, value in
                 guard !value else { return }
                 if dragging {
                     dragging = false
                     onEnd()
                 }
-                settling = false
-                settleGeneration &+= 1
+                hasTarget = false
             }
             .opacity(enabled ? 1 : 0.5)
         }

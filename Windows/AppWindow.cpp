@@ -83,6 +83,14 @@ std::wstring AllLocalIps() {
     return result.empty() ? L"127.0.0.1" : result;
 }
 
+std::wstring CurrentRunCommand() {
+    wchar_t executable[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, executable,
+                                            static_cast<DWORD>(std::size(executable)));
+    if (!length || length >= std::size(executable)) return {};
+    return L"\"" + std::wstring(executable, length) + L"\"";
+}
+
 void EnableHighDpi() {
     if (SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) return;
     SetProcessDPIAware();
@@ -169,7 +177,7 @@ void AppWindow::Destroy() {
 
 void AppWindow::CreateControls(HINSTANCE instance) {
     startupCheck_ = CreateWindowExW(0, L"BUTTON", L"随 Windows 启动",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 1, 1, hwnd_, reinterpret_cast<HMENU>(IDC_STARTUP), instance, nullptr);
     copyButton_ = CreateWindowExW(0, L"BUTTON", L"复制推荐 IP",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
@@ -178,7 +186,6 @@ void AppWindow::CreateControls(HINSTANCE instance) {
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
         0, 0, 1, 1, hwnd_, reinterpret_cast<HMENU>(IDC_FIREWALL), instance, nullptr);
 
-    SetWindowTheme(startupCheck_, L"DarkMode_Explorer", nullptr);
     for (HWND control : { startupCheck_, copyButton_, firewallButton_ }) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont_), TRUE);
     }
@@ -323,6 +330,49 @@ void AppWindow::DrawOwnerButton(const DRAWITEMSTRUCT& item) {
     }
 }
 
+void AppWindow::DrawStartupToggle(const DRAWITEMSTRUCT& item) {
+    RECT rect = item.rcItem;
+    HBRUSH background = CreateSolidBrush(kBackground);
+    FillRect(item.hDC, &rect, background);
+    DeleteObject(background);
+
+    const bool checked = SendMessageW(item.hwndItem, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const int trackWidth = Scale(38, dpi_);
+    const int trackHeight = Scale(20, dpi_);
+    const int trackTop = rect.top + (rect.bottom - rect.top - trackHeight) / 2;
+    RECT track{ rect.left + Scale(2, dpi_), trackTop,
+                rect.left + Scale(2, dpi_) + trackWidth, trackTop + trackHeight };
+    FillRound(item.hDC, track, trackHeight, checked ? kAccent : kCard,
+              checked ? kAccent : kCardBorder);
+
+    const int knobSize = Scale(14, dpi_);
+    const int knobTop = track.top + (trackHeight - knobSize) / 2;
+    const int knobLeft = checked
+        ? track.right - knobSize - Scale(3, dpi_)
+        : track.left + Scale(3, dpi_);
+    HBRUSH knobBrush = CreateSolidBrush(pressed ? kMuted : kText);
+    HGDIOBJ oldBrush = SelectObject(item.hDC, knobBrush);
+    HPEN knobPen = CreatePen(PS_NULL, 0, kText);
+    HGDIOBJ oldPen = SelectObject(item.hDC, knobPen);
+    Ellipse(item.hDC, knobLeft, knobTop, knobLeft + knobSize, knobTop + knobSize);
+    SelectObject(item.hDC, oldPen);
+    SelectObject(item.hDC, oldBrush);
+    DeleteObject(knobPen);
+    DeleteObject(knobBrush);
+
+    wchar_t label[128]{};
+    GetWindowTextW(item.hwndItem, label, static_cast<int>(std::size(label)));
+    RECT textRect{ track.right + Scale(10, dpi_), rect.top, rect.right, rect.bottom };
+    DrawTextLine(item.hDC, label, textRect, bodyFont_, kText);
+
+    if ((item.itemState & ODS_FOCUS) != 0) {
+        RECT focus = textRect;
+        InflateRect(&focus, -Scale(2, dpi_), -Scale(5, dpi_));
+        DrawFocusRect(item.hDC, &focus);
+    }
+}
+
 void AppWindow::RecreateFonts(UINT dpi) {
     ReleaseGraphics();
     dpi_ = dpi ? dpi : 96;
@@ -373,17 +423,17 @@ bool AppWindow::CopyRecommendedIp() {
 
 bool AppWindow::StartWithWindows(bool enabled) {
     HKEY key{};
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                      0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return false;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, nullptr,
+            REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return false;
     bool ok = false;
     if (enabled) {
-        wchar_t executable[32768]{};
-        DWORD length = GetModuleFileNameW(nullptr, executable, 32768);
-        std::wstring quoted = L"\"" + std::wstring(executable, length) + L"\"";
-        ok = length > 0 && length < 32768 &&
+        const std::wstring command = CurrentRunCommand();
+        ok = !command.empty() &&
              RegSetValueExW(key, L"MSFSiPhoneController", 0, REG_SZ,
-                reinterpret_cast<const BYTE*>(quoted.c_str()),
-                static_cast<DWORD>((quoted.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+                reinterpret_cast<const BYTE*>(command.c_str()),
+                static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
     } else {
         LSTATUS result = RegDeleteValueW(key, L"MSFSiPhoneController");
         ok = result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND;
@@ -393,13 +443,26 @@ bool AppWindow::StartWithWindows(bool enabled) {
 }
 
 bool AppWindow::IsStartWithWindows() {
+    const std::wstring expected = CurrentRunCommand();
+    if (expected.empty()) return false;
     HKEY key{};
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                       0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return false;
-    bool exists = RegQueryValueExW(key, L"MSFSiPhoneController", nullptr, nullptr,
-                                   nullptr, nullptr) == ERROR_SUCCESS;
+    DWORD type = 0;
+    DWORD bytes = 0;
+    LSTATUS result = RegQueryValueExW(key, L"MSFSiPhoneController", nullptr,
+                                     &type, nullptr, &bytes);
+    bool matches = false;
+    if (result == ERROR_SUCCESS && type == REG_SZ && bytes >= sizeof(wchar_t)) {
+        std::vector<wchar_t> value(bytes / sizeof(wchar_t) + 1, L'\0');
+        if (RegQueryValueExW(key, L"MSFSiPhoneController", nullptr, &type,
+                reinterpret_cast<BYTE*>(value.data()), &bytes) == ERROR_SUCCESS) {
+            matches = CompareStringOrdinal(value.data(), -1, expected.c_str(), -1, TRUE)
+                == CSTR_EQUAL;
+        }
+    }
     RegCloseKey(key);
-    return exists;
+    return matches;
 }
 
 bool AppWindow::RepairFirewall(HWND owner) {
@@ -527,6 +590,10 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         }
         break;
     case WM_DRAWITEM:
+        if (self && wParam == IDC_STARTUP) {
+            self->DrawStartupToggle(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+            return TRUE;
+        }
         if (self && (wParam == IDC_COPY_IP || wParam == IDC_FIREWALL)) {
             self->DrawOwnerButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
             return TRUE;
@@ -535,9 +602,13 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     case WM_COMMAND:
         if (!self || HIWORD(wParam) != BN_CLICKED) break;
         if (LOWORD(wParam) == IDC_STARTUP) {
-            bool enabled = SendMessageW(self->startupCheck_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            if (!self->StartWithWindows(enabled)) {
-                SendMessageW(self->startupCheck_, BM_SETCHECK, enabled ? BST_UNCHECKED : BST_CHECKED, 0);
+            const bool enabled = SendMessageW(self->startupCheck_, BM_GETCHECK, 0, 0)
+                != BST_CHECKED;
+            if (self->StartWithWindows(enabled)) {
+                SendMessageW(self->startupCheck_, BM_SETCHECK,
+                             enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+                InvalidateRect(self->startupCheck_, nullptr, TRUE);
+            } else {
                 MessageBoxW(hwnd, L"无法更新开机启动设置。", L"设置失败", MB_OK | MB_ICONERROR);
             }
         } else if (LOWORD(wParam) == IDC_COPY_IP) {

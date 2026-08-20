@@ -49,6 +49,7 @@ private:
     void RefreshUi();
     void Paint(HDC dc);
     void DrawOwnerButton(const DRAWITEMSTRUCT& item);
+    void DrawStartupToggle(const DRAWITEMSTRUCT& item);
     void RecreateFonts(UINT dpi);
     void ReleaseGraphics();
     bool CopyRecommendedIp();

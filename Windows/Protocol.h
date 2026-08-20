@@ -15,7 +15,7 @@ constexpr uint16_t kDiscoveryPort = 36668;    // 自动探测（UDP 广播，iPh
 // ---------- 版本 ----------
 constexpr uint32_t kMagic = 0x4D534631;       // "MSF1"
 constexpr uint8_t  kProtocolVersion = 1;
-constexpr char     kServerVersion[] = "1.0.0";
+constexpr char     kServerVersion[] = "1.0.1";
 
 // UDP 包类型（第 5 字节，flags/type 字段）
 enum UdpType : uint8_t {

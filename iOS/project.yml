@@ -14,8 +14,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.msfs.iphonecontroller
         PRODUCT_NAME: MSFSController
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: "2"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: MSFS Controller
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: MSFS 控制器需要通过局域网连接 Windows 端的 MSFS 伴侣程序。
