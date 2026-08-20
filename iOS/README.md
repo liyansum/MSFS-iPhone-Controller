@@ -26,10 +26,13 @@ xcodegen generate
 
 ## 使用
 
-1. 在 iPhone 首次打开 App，进入 SETTINGS 填入 Windows 端显示的主机 IP。
+1. 在 iPhone 首次打开 App，进入 SETTINGS 自动发现电脑，或填入 Windows 端显示的推荐 IP。
 2. 点击 `Test Connection`；状态显示 `PC 已连接` / `MSFS 已连接` 后点 `保存并连接`。
 3. 回到 CONTROL 页：点击 `GYRO ARM`（自动执行一次 RECENTER）开始姿态控制。
 4. 地图页自动跟随飞机；切回控制页需要重新 ARM。
+
+断开连接时 CONTROL 页只显示非阻塞状态卡，Tab 栏仍可操作；点击「修改主机」后，
+选择发现到的电脑或点「保存并连接」会使用新地址并自动返回控制页。
 
 ## CI 产物（无签名 .ipa）
 

@@ -6,6 +6,7 @@ struct GyroView: View {
     let roll: Float          // -100..100
     let pitch: Float         // -100..100
     let armed: Bool
+    let enabled: Bool
     let onToggle: () -> Void
     let onRecenter: () -> Void
 
@@ -31,6 +32,8 @@ struct GyroView: View {
                     .foregroundColor(.white)
             }
             .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.45)
 
             Button(action: onRecenter) {
                 Text("RECENTER")

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ThrottleView: View {
     let telemetryThrottle: Double   // 0..1（未拖动时显示 MSFS 实际值）
+    let enabled: Bool
     let onBegin: (Float) -> Void
     let onChange: (Float) -> Void
     let onEnd: () -> Void
@@ -47,6 +48,7 @@ struct ThrottleView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
+                        guard enabled else { return }
                         let val = value(for: v.location.y, height: h)
                         if !dragging {
                             dragging = true
@@ -62,6 +64,13 @@ struct ThrottleView: View {
                         onEnd()
                     }
             )
+            .onChange(of: enabled) { _, value in
+                if !value && dragging {
+                    dragging = false
+                    onEnd()
+                }
+            }
+            .opacity(enabled ? 1 : 0.5)
         }
     }
 

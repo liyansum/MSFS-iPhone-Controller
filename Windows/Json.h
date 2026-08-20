@@ -80,6 +80,9 @@ public:
 
     // ---- 解析 ----
     static Json parse(const std::string& text, bool& ok) {
+        // 调用方只负责读取结果；解析器必须自行初始化成功状态。
+        // 旧实现保留了调用方传入的 false，导致所有合法 TCP JSON 都被拒绝。
+        ok = true;
         const char* p = text.c_str();
         const char* end = p + text.size();
         skipWs(p, end);

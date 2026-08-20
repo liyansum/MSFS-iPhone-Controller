@@ -15,8 +15,10 @@ class SafetyWatchdog;
 class UDPServer {
 public:
     using SessionCheck = std::function<bool(uint32_t sessionId)>;
+    using ControlEnabled = std::function<bool()>;
 
-    void Start(uint16_t port, SessionCheck check, FlightController* fc, SafetyWatchdog* wd);
+    void Start(uint16_t port, SessionCheck check, ControlEnabled enabled,
+               FlightController* fc, SafetyWatchdog* wd);
     void Stop();
 
     // 自动探测状态（供 UI 显示）
@@ -38,6 +40,7 @@ private:
     std::atomic<unsigned long long> sock_{ 0 };
     std::atomic<unsigned long long> discoverySock_{ 0 };
     SessionCheck check_;
+    ControlEnabled controlEnabled_;
     FlightController* fc_ = nullptr;
     SafetyWatchdog* wd_ = nullptr;
 

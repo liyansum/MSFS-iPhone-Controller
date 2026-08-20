@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var conn: ConnectionManager
     @EnvironmentObject var settings: SettingsStore
+    var onDone: () -> Void = {}
 
     @State private var editingHost = ""
     @State private var testing = false
@@ -15,6 +16,7 @@ struct SettingsView: View {
     @State private var discovery = DiscoveryManager()
     @State private var discovered: [DiscoveryManager.Host] = []
     @State private var scanning = false
+    @State private var scanToken: UUID?
 
     var body: some View {
         Form {
@@ -32,6 +34,7 @@ struct SettingsView: View {
         .onDisappear {
             discovery.stop()
             scanning = false
+            scanToken = nil
         }
         .onChange(of: editingHost) { _, v in
             testResult = nil
@@ -149,11 +152,14 @@ struct SettingsView: View {
     private func scan() {
         guard !scanning else { return }
         scanning = true
+        let token = UUID()
+        scanToken = token
         discovered.removeAll()
         discovery.onLog = { msg in
             self.conn.logDiag(msg)
         }
         discovery.start { host in
+            guard self.scanToken == token else { return }
             let existingIps = Set(self.discovered.flatMap { $0.ips })
             let newIps = host.ips.filter { !existingIps.contains($0) }
             guard !newIps.isEmpty else { return }
@@ -161,8 +167,9 @@ struct SettingsView: View {
         }
         conn.logDiag("开始自动探测 (6s)")
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-            if self.scanning {
+            if self.scanning && self.scanToken == token {
                 self.scanning = false
+                self.scanToken = nil
                 self.discovery.stop()
                 self.conn.logDiag("自动探测结束")
             }
@@ -177,7 +184,9 @@ struct SettingsView: View {
         editingHost = ip
         discovery.stop()
         scanning = false
+        scanToken = nil
         conn.connect()
+        onDone()
         Haptics.success()
     }
 
@@ -302,5 +311,6 @@ struct SettingsView: View {
     private func saveAndConnect() {
         settings.host = trimmedHost
         conn.connect()
+        onDone()
     }
 }

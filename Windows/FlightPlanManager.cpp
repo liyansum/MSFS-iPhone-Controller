@@ -3,20 +3,48 @@
 #include <sstream>
 #include <regex>
 #include <cmath>
+#include <filesystem>
+#include <cstdint>
+#include <cstring>
 
 namespace {
 
 bool ReadFileUtf8(const std::wstring& path, std::string& out) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     if (!in) return false;
     std::stringstream ss;
     ss << in.rdbuf();
     std::string raw = ss.str();
     if (raw.size() >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE) {
-        // UTF-16LE BOM -> 转窄字符（PLN 内容基本为 ASCII）
-        const wchar_t* w = reinterpret_cast<const wchar_t*>(raw.data() + 2);
-        size_t n = (raw.size() - 2) / sizeof(wchar_t);
-        for (size_t i = 0; i < n; ++i) out += (char)(w[i] & 0xFF);
+        // 按字节解码 UTF-16LE，避免 wchar_t 宽度差异，也保留非 ASCII 航点名。
+        auto appendUtf8 = [&](uint32_t cp) {
+            if (cp <= 0x7F) out.push_back((char)cp);
+            else if (cp <= 0x7FF) {
+                out.push_back((char)(0xC0 | (cp >> 6)));
+                out.push_back((char)(0x80 | (cp & 0x3F)));
+            } else if (cp <= 0xFFFF) {
+                out.push_back((char)(0xE0 | (cp >> 12)));
+                out.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+                out.push_back((char)(0x80 | (cp & 0x3F)));
+            } else {
+                out.push_back((char)(0xF0 | (cp >> 18)));
+                out.push_back((char)(0x80 | ((cp >> 12) & 0x3F)));
+                out.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+                out.push_back((char)(0x80 | (cp & 0x3F)));
+            }
+        };
+        for (size_t i = 2; i + 1 < raw.size();) {
+            uint32_t cp = (unsigned char)raw[i] | ((uint32_t)(unsigned char)raw[i + 1] << 8);
+            i += 2;
+            if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < raw.size()) {
+                uint32_t low = (unsigned char)raw[i] | ((uint32_t)(unsigned char)raw[i + 1] << 8);
+                if (low >= 0xDC00 && low <= 0xDFFF) {
+                    i += 2;
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                }
+            }
+            appendUtf8(cp);
+        }
     } else {
         if (raw.size() >= 3 && (unsigned char)raw[0] == 0xEF &&
             (unsigned char)raw[1] == 0xBB && (unsigned char)raw[2] == 0xBF) {
@@ -25,6 +53,22 @@ bool ReadFileUtf8(const std::wstring& path, std::string& out) {
         out = std::move(raw);
     }
     return true;
+}
+
+std::string XmlUnescape(std::string value) {
+    struct Entity { const char* encoded; const char* decoded; };
+    static constexpr Entity entities[] = {
+        { "&amp;", "&" }, { "&quot;", "\"" }, { "&apos;", "'" },
+        { "&lt;", "<" }, { "&gt;", ">" },
+    };
+    for (const auto& e : entities) {
+        size_t pos = 0;
+        while ((pos = value.find(e.encoded, pos)) != std::string::npos) {
+            value.replace(pos, strlen(e.encoded), e.decoded);
+            pos += strlen(e.decoded);
+        }
+    }
+    return value;
 }
 
 } // namespace
@@ -57,38 +101,57 @@ std::string FlightPlanManager::Summary() const {
 void FlightPlanManager::ParseXml(const std::string& xml) {
     wps_.clear();
 
-    static const std::regex reBlock("<ATCWaypoint\\s+id=\"([^\"]*)\"");
-    static const std::regex reType("<ATCWaypointType>([^<]+)</ATCWaypointType>");
-    static const std::regex rePos("<WorldPosition>([^<]+)</WorldPosition>");
-    static const std::regex reIdent("<ICAOIdent>([^<]+)</ICAOIdent>");
+    static const std::regex reBlock(
+        R"(<ATCWaypoint\b([^>]*)>([\s\S]*?)</ATCWaypoint\s*>)",
+        std::regex_constants::icase);
+    static const std::regex reId(R"re(\bid\s*=\s*["']([^"']*)["'])re",
+                                 std::regex_constants::icase);
+    static const std::regex reType(R"(<ATCWaypointType\s*>([^<]+)</ATCWaypointType\s*>)",
+                                   std::regex_constants::icase);
+    static const std::regex rePos(R"(<WorldPosition\s*>([^<]+)</WorldPosition\s*>)",
+                                  std::regex_constants::icase);
+    static const std::regex reIdent(R"(<ICAOIdent\s*>([^<]+)</ICAOIdent\s*>)",
+                                    std::regex_constants::icase);
+    static const std::regex reAltitude(R"(([+-]\d+(?:\.\d+)?)\s*$)");
 
-    std::string::const_iterator it = xml.begin(), end = xml.end();
     int index = 0;
-    for (std::sregex_iterator m(it, end, reBlock); m != std::sregex_iterator(); ++m, ++index) {
-        size_t blockStart = m->position(0);
-        std::string tail(xml.substr(blockStart));
+    for (std::sregex_iterator m(xml.begin(), xml.end(), reBlock);
+         m != std::sregex_iterator(); ++m) {
+        const std::string attributes = (*m)[1].str();
+        const std::string block = (*m)[2].str();
 
         Waypoint wp;
         wp.index = index;
 
         std::smatch tm;
-        if (std::regex_search(tail, tm, reType))
-            wp.type = tm[1].str();
-        if (std::regex_search(tail, tm, reIdent))
-            wp.ident = tm[1].str();
-        if (std::regex_search(tail, tm, rePos)) {
+        if (std::regex_search(attributes, tm, reId))
+            wp.ident = XmlUnescape(tm[1].str());
+        if (std::regex_search(block, tm, reType))
+            wp.type = XmlUnescape(tm[1].str());
+        // ICAOIdent 比 id 更权威；自定义航点通常只有 id。
+        if (std::regex_search(block, tm, reIdent))
+            wp.ident = XmlUnescape(tm[1].str());
+
+        bool havePosition = false;
+        if (std::regex_search(block, tm, rePos)) {
             double lat = 0, lon = 0;
             if (ParseWorldPosition(tm[1].str(), lat, lon)) {
                 wp.lat = lat;
                 wp.lon = lon;
+                havePosition = true;
             }
             std::string pos = tm[1].str();
-            size_t sp = pos.rfind(' ');
-            if (sp != std::string::npos) {
-                try { wp.alt = std::stod(pos.substr(sp + 1)); } catch (...) {}
+            std::smatch am;
+            if (std::regex_search(pos, am, reAltitude)) {
+                try { wp.alt = std::stod(am[1].str()); } catch (...) {}
             }
         }
-        wps_.push_back(std::move(wp));
+        // 无坐标节点不能安全绘制；跳过并保持连续索引。
+        if (havePosition) {
+            if (wp.ident.empty()) wp.ident = "WP" + std::to_string(index + 1);
+            wp.index = index++;
+            wps_.push_back(std::move(wp));
+        }
     }
 }
 

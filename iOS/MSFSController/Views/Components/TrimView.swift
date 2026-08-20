@@ -5,6 +5,7 @@ import SwiftUI
 
 struct TrimView: View {
     let trimValue: Double           // -1..1
+    let enabled: Bool
     let onTrimUp: () -> Void
     let onTrimDn: () -> Void
 
@@ -12,7 +13,7 @@ struct TrimView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            PressHoldButton(action: onTrimUp) {
+            PressHoldButton(enabled: enabled, action: onTrimUp) {
                 Image(systemName: "chevron.up.circle.fill")
                     .font(.system(size: 34))
                     .foregroundColor(.blue)
@@ -27,13 +28,14 @@ struct TrimView: View {
                     .monospacedDigit()
             }
 
-            PressHoldButton(action: onTrimDn) {
+            PressHoldButton(enabled: enabled, action: onTrimDn) {
                 Image(systemName: "chevron.down.circle.fill")
                     .font(.system(size: 34))
                     .foregroundColor(.orange)
             }
         }
         .onDisappear { timer?.invalidate(); timer = nil }
+        .opacity(enabled ? 1 : 0.5)
     }
 
     private var percentText: String {
@@ -44,13 +46,15 @@ struct TrimView: View {
 
 // 点击立即执行一次；长按 0.4s 后每 120ms 重复执行，松手停止。
 struct PressHoldButton<Content: View>: View {
+    let enabled: Bool
     let action: () -> Void
     let content: Content
 
     @State private var repeatTimer: Timer?
     @State private var active = false
 
-    init(action: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+    init(enabled: Bool, action: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.enabled = enabled
         self.action = action
         self.content = content()
     }
@@ -62,6 +66,7 @@ struct PressHoldButton<Content: View>: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
+                        guard enabled else { return }
                         if repeatTimer == nil {
                             action()          // 立即单步
                             active = true
@@ -78,6 +83,9 @@ struct PressHoldButton<Content: View>: View {
                         stopTimer()
                     }
             )
+            .onChange(of: enabled) { _, value in
+                if !value { stopTimer() }
+            }
     }
 
     private func stopTimer() {

@@ -19,9 +19,13 @@ struct ControllerState {
 class FlightController {
 public:
     // UDP 实时控制包更新
-    void UpdateFromControl(uint32_t seq, uint64_t ts, uint16_t mask,
+    // 返回 true 表示包已被接收；重复/乱序包返回 false。
+    bool UpdateFromControl(uint32_t seq, uint64_t ts, uint16_t mask,
                            int16_t aileron, int16_t elevator,
                            int16_t rudder, uint16_t throttle);
+
+    // TCP HELLO 建立新会话时重置 UDP 序号窗口，并立即回中瞬时轴。
+    void ResetSession();
 
     // 看门狗回中：Aileron/Elevator/Rudder = 0；Throttle 保持不变
     void NeutralizeAxes();
@@ -31,4 +35,5 @@ public:
 private:
     mutable std::mutex mtx_;
     ControllerState state_;
+    bool hasSequence_ = false;
 };

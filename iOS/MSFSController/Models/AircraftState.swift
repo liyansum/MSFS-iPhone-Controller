@@ -43,9 +43,9 @@ struct AircraftState: Identifiable, Decodable, Equatable {
         groundSpeed = try c.decodeIfPresent(Double.self, forKey: .gs) ?? 0
         indicatedAirspeed = try c.decodeIfPresent(Double.self, forKey: .ias) ?? 0
         verticalSpeed = try c.decodeIfPresent(Double.self, forKey: .vs) ?? 0
-        flapsPercent = try c.decodeIfPresent(Double.self, forKey: .flaps) ?? 0
-        elevatorTrim = try c.decodeIfPresent(Double.self, forKey: .trim) ?? 0
-        throttle = try c.decodeIfPresent(Double.self, forKey: .throttle) ?? 0
+        flapsPercent = min(max(try c.decodeIfPresent(Double.self, forKey: .flaps) ?? 0, 0), 100)
+        elevatorTrim = min(max(try c.decodeIfPresent(Double.self, forKey: .trim) ?? 0, -1), 1)
+        throttle = min(max(try c.decodeIfPresent(Double.self, forKey: .throttle) ?? 0, 0), 1)
         gearDown = try c.decodeIfPresent(Bool.self, forKey: .gear) ?? false
         parkingBrake = try c.decodeIfPresent(Bool.self, forKey: .parkingBrake) ?? false
         onGround = try c.decodeIfPresent(Bool.self, forKey: .onGround) ?? false

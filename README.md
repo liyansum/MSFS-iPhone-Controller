@@ -63,6 +63,9 @@ docs/       协议文档
 - 地图：当前位置、航向、经纬度、实际航迹、计划航线、航点详情
 - 安全：切页/后台自动 DISARM，断线回中，持久状态（Throttle/Trim/Flaps/Gear）保持
 
+发布前请按 [V1 功能验收清单](docs/VERIFICATION.md) 完成 Windows 自动测试与
+iPhone + MSFS 真机验收。
+
 ## 开发顺序参考
 
 V0.1 PC 基础 → V0.2 通信 → V0.3 Gyro → V0.4 完整控制 → V0.5 双向状态 → V0.6 地图 → V0.7 航线 → V1.0 稳定测试。

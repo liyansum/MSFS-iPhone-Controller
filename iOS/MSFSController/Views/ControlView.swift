@@ -45,9 +45,9 @@ struct ControlView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundColor(.secondary)
             Spacer()
-            Text(conn.aircraftName)
+            Text(conn.lastError ?? conn.aircraftName)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(conn.lastError == nil ? .secondary : .orange)
                 .lineLimit(1)
         }
         .font(.caption.bold())
@@ -61,6 +61,7 @@ struct ControlView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             ThrottleView(telemetryThrottle: conn.aircraft.throttle,
+                         enabled: conn.simConnected,
                          onBegin: { conn.beginThrottle($0) },
                          onChange: { conn.setThrottle($0) },
                          onEnd: { conn.endThrottle() })
@@ -74,6 +75,7 @@ struct ControlView: View {
         GyroView(roll: displayRoll,
                  pitch: displayPitch,
                  armed: conn.gyroState == .armed,
+                 enabled: conn.simConnected,
                  onToggle: { conn.gyroState == .armed ? conn.disarmGyro() : conn.armGyro() },
                  onRecenter: { conn.recenter() })
     }
@@ -82,6 +84,7 @@ struct ControlView: View {
 
     private var trimSection: some View {
         TrimView(trimValue: conn.aircraft.elevatorTrim,
+                 enabled: conn.simConnected,
                  onTrimUp: { conn.sendCommand(TcpCmd.trimUp) },
                  onTrimDn: { conn.sendCommand(TcpCmd.trimDn) })
     }
@@ -93,7 +96,8 @@ struct ControlView: View {
             Text("RUDDER")
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            RudderView(onBegin: { conn.beginRudder($0) },
+            RudderView(enabled: conn.simConnected,
+                       onBegin: { conn.beginRudder($0) },
                        onChange: { conn.setRudder($0) },
                        onEnd: { conn.endRudder() })
         }
@@ -104,6 +108,7 @@ struct ControlView: View {
     private var bottomRow: some View {
         HStack(spacing: 8) {
             BrakeButton(
+                enabled: conn.simConnected,
                 onPress: { conn.sendCommand(TcpCmd.brake, value: true) },
                 onRelease: { conn.sendCommand(TcpCmd.brake, value: false) }
             )
@@ -119,6 +124,8 @@ struct ControlView: View {
                 .foregroundColor(conn.aircraft.parkingBrake ? .green : .secondary)
         }
         .frame(maxWidth: .infinity)
+        .disabled(!conn.simConnected)
+        .opacity(conn.simConnected ? 1 : 0.55)
     }
 
     private func commandButton(_ title: String, systemImage: String,
@@ -135,6 +142,7 @@ struct ControlView: View {
 
 // 长按保持刹车
 struct BrakeButton: View {
+    let enabled: Bool
     let onPress: () -> Void
     let onRelease: () -> Void
     @State private var pressed = false
@@ -151,6 +159,7 @@ struct BrakeButton: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
+                        guard enabled else { return }
                         if !pressed {
                             pressed = true
                             onPress()
@@ -163,5 +172,11 @@ struct BrakeButton: View {
                         }
                     }
             )
+            .onChange(of: enabled) { _, value in
+                if !value && pressed {
+                    pressed = false
+                    onRelease()
+                }
+            }
     }
 }

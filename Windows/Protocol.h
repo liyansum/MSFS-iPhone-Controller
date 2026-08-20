@@ -33,6 +33,8 @@ constexpr uint16_t kAxisThrottle = 1 << 3;
 // MSFS 轴事件取值范围
 constexpr int16_t  kAxisMin      = -16383;
 constexpr int16_t  kAxisMax      = 16384;
+constexpr int16_t  kRudderMin    = -16383;
+constexpr int16_t  kRudderMax    = 16383;
 constexpr uint16_t kThrottleMax  = 16383;
 
 // UDP 固定二进制包（32 字节，小端，1 字节对齐）

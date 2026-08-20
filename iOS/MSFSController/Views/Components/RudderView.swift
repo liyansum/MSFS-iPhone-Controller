@@ -3,6 +3,7 @@ import SwiftUI
 // Rudder：自动回中横向滑杆。拖动期间持续发送，松手回到 0 并发送回中包。
 
 struct RudderView: View {
+    let enabled: Bool
     let onBegin: (Float) -> Void
     let onChange: (Float) -> Void
     let onEnd: () -> Void
@@ -48,6 +49,7 @@ struct RudderView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
+                        guard enabled else { return }
                         let normalized = (v.location.x - w / 2) / halfTravel
                         let val = Float(min(max(Double(normalized), -1), 1))
                         if !dragging {
@@ -65,6 +67,14 @@ struct RudderView: View {
                         onEnd()
                     }
             )
+            .onChange(of: enabled) { _, isEnabled in
+                if !isEnabled && dragging {
+                    dragging = false
+                    value = 0
+                    onEnd()
+                }
+            }
+            .opacity(enabled ? 1 : 0.5)
         }
     }
 }

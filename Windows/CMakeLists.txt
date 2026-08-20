@@ -4,6 +4,10 @@ project(MSFSiPhoneController LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "MSFS 2020 与仓库内置 SimConnect SDK 仅支持 x64，请使用 -A x64")
+endif()
+
 # ------------------------------------------------------------------
 # SimConnect SDK 路径
 #   1) 命令行：-DSIMCONNECT_SDK_PATH=<路径>
@@ -25,6 +29,9 @@ if(NOT EXISTS "${SIMCONNECT_SDK_PATH}/include/SimConnect.h")
         "未找到 SimConnect SDK（缺少 include/SimConnect.h）。请指定路径：\n"
         "  cmake -B build -DSIMCONNECT_SDK_PATH=\"D:/MSFS SDK/SimConnect SDK\"")
 endif()
+if(NOT EXISTS "${SIMCONNECT_SDK_PATH}/lib/SimConnect.lib")
+    message(FATAL_ERROR "SimConnect SDK 缺少 x64 导入库 lib/SimConnect.lib")
+endif()
 
 file(GLOB SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
@@ -38,13 +45,19 @@ target_include_directories(MSFSiPhoneController PRIVATE
 target_link_directories(MSFSiPhoneController PRIVATE
     "${SIMCONNECT_SDK_PATH}/lib")
 target_link_libraries(MSFSiPhoneController PRIVATE
-    SimConnect.lib ws2_32 shell32 iphlpapi)
+    SimConnect.lib ws2_32 shell32 iphlpapi dwmapi uxtheme)
 
 target_compile_definitions(MSFSiPhoneController PRIVATE
     _CRT_SECURE_NO_WARNINGS
     _WINSOCK_DEPRECATED_NO_WARNINGS
     WIN32_LEAN_AND_MEAN
-    NOMINMAX)
+    NOMINMAX
+    UNICODE
+    _UNICODE)
+target_compile_options(MSFSiPhoneController PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+target_link_options(MSFSiPhoneController PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-municode>)
 
 # 构建后把 SimConnect.dll 复制到 exe 旁（运行时依赖，避免缺少 DLL 报错）
 if(EXISTS "${SIMCONNECT_SDK_PATH}/lib/SimConnect.dll")
@@ -52,4 +65,22 @@ if(EXISTS "${SIMCONNECT_SDK_PATH}/lib/SimConnect.dll")
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${SIMCONNECT_SDK_PATH}/lib/SimConnect.dll"
             "$<TARGET_FILE_DIR:MSFSiPhoneController>/SimConnect.dll")
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(MSFSControllerCoreTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/CoreTests.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FlightController.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FlightPlanManager.cpp")
+    target_include_directories(MSFSControllerCoreTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(MSFSControllerCoreTests PRIVATE
+        _CRT_SECURE_NO_WARNINGS NOMINMAX)
+    target_compile_options(MSFSControllerCoreTests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+    if(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
+        add_test(NAME MSFSControllerCoreTests COMMAND MSFSControllerCoreTests)
+    else()
+        message(STATUS "交叉编译环境没有 Windows 执行器：仅构建核心测试，不注册 ctest")
+    endif()
 endif()

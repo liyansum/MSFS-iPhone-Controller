@@ -7,21 +7,32 @@ import CoreMotion
 //   device roll   -> elevator（前后倾斜/俯仰）
 
 final class AttitudeProcessor {
+    private let lock = NSLock()
     private var neutral: CMAttitude?
 
-    var hasNeutral: Bool { neutral != nil }
+    var hasNeutral: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return neutral != nil
+    }
 
     func recenter(with attitude: CMAttitude) {
-        neutral = attitude
+        lock.lock()
+        neutral = attitude.copy() as? CMAttitude
+        lock.unlock()
     }
 
     func reset() {
+        lock.lock()
         neutral = nil
+        lock.unlock()
     }
 
     /// 返回相对中性姿态的 (pitchDeg, rollDeg)
     func relative(attitude: CMAttitude) -> (pitchDeg: Double, rollDeg: Double) {
-        guard let n = neutral,
+        lock.lock()
+        let reference = neutral?.copy() as? CMAttitude
+        lock.unlock()
+        guard let n = reference,
               let copy = attitude.copy() as? CMAttitude else { return (0, 0) }
         copy.multiply(byInverseOf: n)
         let radToDeg = 180.0 / Double.pi

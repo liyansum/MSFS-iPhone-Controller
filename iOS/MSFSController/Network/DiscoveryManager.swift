@@ -14,36 +14,38 @@ final class DiscoveryManager {
         var tcpPort: UInt16
     }
 
+    private let stateLock = NSLock()
     private var sock: Int32 = -1
-    private var running = false
+    private var scanID: UUID?
     private var thread: Thread?
     private var onHost: ((Host) -> Void)?
     var onLog: ((String) -> Void)?
     private(set) var sentCount = 0
     private(set) var replyCount = 0
 
-    var isRunning: Bool { running }
+    var isRunning: Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return scanID != nil
+    }
 
     /// 启动探测：每 2 秒广播一次，期间收到的应答通过 onHost 回调（主线程）。
     func start(onHost: @escaping (Host) -> Void) {
-        guard !running else { return }
-        running = true
+        guard !isRunning else { return }
         self.onHost = onHost
         sentCount = 0
         replyCount = 0
 
-        sock = socket(AF_INET, SOCK_DGRAM, 0)
-        if sock < 0 {
+        let newSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        if newSocket < 0 {
             onLog?("UDP 探测: socket 创建失败 (errno \(errno))")
-            running = false
             return
         }
         onLog?("UDP 探测: socket 已创建")
 
         var broadcast: Int32 = 1
-        setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(newSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout<Int32>.size))
         var reuse: Int32 = 1
-        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(newSocket, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -51,30 +53,34 @@ final class DiscoveryManager {
         addr.sin_addr.s_addr = INADDR_ANY
         let bound = withUnsafePointer(to: &addr) { p -> Int32 in
             p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(newSocket, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         if bound != 0 {
             onLog?("UDP 探测: bind 失败 (errno \(errno))")
-            close(sock)
-            sock = -1
-            running = false
+            close(newSocket)
             return
         }
+        let id = UUID()
+        stateLock.lock()
+        sock = newSocket
+        scanID = id
+        stateLock.unlock()
         onLog?("UDP 探测: 开始广播 \(Proto.discoveryRequest.trimmingCharacters(in: .newlines)) -> 255.255.255.255:\(Proto.discoveryPort)")
 
-        let t = Thread { [weak self] in self?.loop() }
+        let t = Thread { [weak self] in self?.loop(socket: newSocket, id: id) }
         t.name = "msfs.discovery"
         thread = t
         t.start()
     }
 
     func stop() {
-        running = false
-        if sock >= 0 {
-            close(sock)
-            sock = -1
-        }
+        stateLock.lock()
+        let oldSocket = sock
+        sock = -1
+        scanID = nil
+        stateLock.unlock()
+        if oldSocket >= 0 { close(oldSocket) }
     }
 
     deinit {
@@ -83,18 +89,24 @@ final class DiscoveryManager {
 
     // MARK: - 内部
 
-    private func loop() {
+    private func isCurrent(_ id: UUID) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return scanID == id
+    }
+
+    private func loop(socket: Int32, id: UUID) {
         var lastSend = Date(timeIntervalSince1970: 0)
         var buf = [UInt8](repeating: 0, count: 2048)
 
-        while running {
+        while isCurrent(id) {
             if Date().timeIntervalSince(lastSend) >= 2.0 {
-                sendBroadcast()
+                sendBroadcast(socket: socket)
                 lastSend = Date()
             }
 
-            var pfd = pollfd(fd: sock, events: Int16(POLLIN), revents: 0)
+            var pfd = pollfd(fd: socket, events: Int16(POLLIN), revents: 0)
             let n = poll(&pfd, 1, 400)
+            guard isCurrent(id) else { break }
             if n > 0 && (pfd.revents & Int16(POLLIN)) != 0 {
                 var from = sockaddr_in()
                 var len = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -102,25 +114,25 @@ final class DiscoveryManager {
                 let r = buf.withUnsafeMutableBytes { ptr -> Int in
                     withUnsafeMutablePointer(to: &from) { p in
                         p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                            Int(recvfrom(sock, ptr.baseAddress, bufCount, 0, $0, &len))
+                            Int(recvfrom(socket, ptr.baseAddress, bufCount, 0, $0, &len))
                         }
                     }
                 }
                 if r > 0 {
                     replyCount += 1
                     let sourceIP = inet_ntoa(from.sin_addr).map { String(cString: $0) }
-                    handleReply(Data(buf[0..<r]), sourceIP: sourceIP)
+                    handleReply(Data(buf[0..<r]), sourceIP: sourceIP, id: id)
                 }
             }
         }
-        if sock >= 0 {
-            close(sock)
-            sock = -1
-        }
+        stateLock.lock()
+        let ownsSocket = scanID == id && sock == socket
+        if ownsSocket { sock = -1; scanID = nil }
+        stateLock.unlock()
+        if ownsSocket { close(socket) }
     }
 
-    private func sendBroadcast() {
-        guard sock >= 0 else { return }
+    private func sendBroadcast(socket: Int32) {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = Proto.discoveryPort.bigEndian
@@ -130,7 +142,7 @@ final class DiscoveryManager {
         msg.withCString { c in
             result = withUnsafePointer(to: &addr) { p -> Int in
                 p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Int(sendto(sock, c, msg.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)))
+                    Int(sendto(socket, c, msg.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)))
                 }
             }
         }
@@ -141,9 +153,10 @@ final class DiscoveryManager {
         }
     }
 
-    private func handleReply(_ data: Data, sourceIP: String?) {
+    private func handleReply(_ data: Data, sourceIP: String?, id: UUID) {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               obj["type"] as? String == TcpMsg.hostDiscovery,
+              (obj["protocolVersion"] as? NSNumber)?.uint8Value == Proto.protocolVersion,
               let advertisedIPs = obj["ips"] as? [String], !advertisedIPs.isEmpty else { return }
 
         // 应答包的来源地址一定是手机当前可达的那张 Windows 网卡；多网卡机器上
@@ -152,12 +165,15 @@ final class DiscoveryManager {
         if let sourceIP, !sourceIP.isEmpty { ips.append(sourceIP) }
         for ip in advertisedIPs where !ips.contains(ip) { ips.append(ip) }
 
+        let udpValue = obj["udpPort"] as? Int ?? Int(Proto.defaultUdpPort)
+        let tcpValue = obj["tcpPort"] as? Int ?? Int(Proto.defaultTcpPort)
         let host = Host(name: obj["name"] as? String ?? "",
                         ips: ips,
-                        udpPort: UInt16(obj["udpPort"] as? Int ?? Int(Proto.defaultUdpPort)),
-                        tcpPort: UInt16(obj["tcpPort"] as? Int ?? Int(Proto.defaultTcpPort)))
+                        udpPort: UInt16(exactly: udpValue) ?? Proto.defaultUdpPort,
+                        tcpPort: UInt16(exactly: tcpValue) ?? Proto.defaultTcpPort)
         DispatchQueue.main.async { [weak self] in
-            self?.onHost?(host)
+            guard let self, self.isCurrent(id) else { return }
+            self.onHost?(host)
         }
     }
 }

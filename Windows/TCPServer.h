@@ -60,4 +60,6 @@ private:
     SOCKET clientSock_ = INVALID_SOCKET;
     mutable std::mutex errorMtx_;
     std::string lastError_;
+    std::mutex routeMtx_;
+    std::string lastRouteJson_;
 };

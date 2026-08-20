@@ -63,16 +63,31 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
         },
         [&](bool connected, const std::string& aircraft) {
             status.SetSim(connected);
+            telemetry.SetSimConnected(connected);
             if (!aircraft.empty()) {
                 status.SetAircraft(aircraft);
                 telemetry.SetAircraftName(aircraft);
+            } else if (!connected) {
+                status.SetAircraft("");
+                telemetry.SetAircraftName("");
+                flightPlan.Clear();
+                tcp.SendRoute(flightPlan);
+                status.SetFlightPlan("");
             }
             tcp.SendStatus(connected, aircraft);
         },
         [&](const std::wstring& plnFile) {
-            if (!plnFile.empty() && flightPlan.LoadFile(plnFile)) {
+            if (plnFile.empty()) {
+                flightPlan.Clear();
+                tcp.SendRoute(flightPlan);
+                status.SetFlightPlan("");
+            } else if (flightPlan.LoadFile(plnFile)) {
                 tcp.SendRoute(flightPlan);
                 status.SetFlightPlan(flightPlan.Summary());
+            } else {
+                flightPlan.Clear();
+                tcp.SendRoute(flightPlan);
+                status.SetFlightPlan("Unable to parse active flight plan");
             }
         });
 
@@ -81,7 +96,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
 
     // ---------- UDP 实时控制 ----------
     udp.Start(proto::kDefaultUdpPort,
-              [&](uint32_t sid) { return sid == tcp.SessionId(); },
+              [&](uint32_t sid) { return sid != 0 && sid == tcp.SessionId(); },
+              [&]() { return sim.IsSimConnected(); },
               &fc, &watchdog);
 
     // ---------- TCP 状态与命令 ----------
@@ -120,6 +136,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
             } else {
                 status.SetLastControlAge(-1);
             }
+            status.SetWatchdogFired(watchdog.IsExpired());
             if (phone) status.SetStatus("Ready");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

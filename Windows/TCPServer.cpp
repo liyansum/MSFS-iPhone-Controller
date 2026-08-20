@@ -13,7 +13,9 @@
 #include <cstring>
 #include <chrono>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
+#endif
 
 namespace {
 
@@ -97,12 +99,15 @@ void TCPServer::Start(uint16_t port, SimConnectManager* sim, FlightController* f
 void TCPServer::Stop() {
     running_ = false;
     ready_ = false;
+    if (sim_ && sim_->IsSimConnected()) sim_->EnqueueCommand(kEvBrakeRelease);
+    if (fc_) fc_->ResetSession();
     SOCKET l = (SOCKET)listenSock_.exchange(0);
     if (l != 0 && l != INVALID_SOCKET) closesocket(l);
     if (thread_.joinable()) thread_.join();
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
         if (clientSock_ != INVALID_SOCKET) {
+            shutdown(clientSock_, SD_BOTH);
             closesocket(clientSock_);
             clientSock_ = INVALID_SOCKET;
         }
@@ -147,11 +152,27 @@ void TCPServer::AcceptLoop(uint16_t port) {
             closesocket(client);
             break;
         }
-        // 第一版单客户端：已有连接则拒绝新连接
+        // 避免遥测发送在对端不再读取时永久阻塞 SimConnect/遥测线程。
+        DWORD sendTimeoutMs = 1000;
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&sendTimeoutMs), sizeof(sendTimeoutMs));
+        // 单客户端，但新连接应替换旧连接。iPhone 修改主机或网络切换时，
+        // 旧 TCP 会话可能尚未被 Windows 检测为断开；直接拒绝会令客户端陷入
+        // "already connected" 循环。
         if (clientActive_.load()) {
-            SendLine(client, BuildError(2, "already connected"));
-            closesocket(client);
-            continue;
+            if (sim_ && sim_->IsSimConnected()) sim_->EnqueueCommand(kEvBrakeRelease);
+            if (fc_) fc_->ResetSession();
+            {
+                std::lock_guard<std::mutex> lock(sendMtx_);
+                if (clientSock_ != INVALID_SOCKET) {
+                    shutdown(clientSock_, SD_BOTH);
+                    closesocket(clientSock_);
+                    clientSock_ = INVALID_SOCKET;
+                }
+            }
+            if (clientThread_.joinable()) clientThread_.join();
+            clientActive_ = false;
+            sessionId_ = 0;
         }
         if (clientThread_.joinable()) clientThread_.join();
         {
@@ -174,6 +195,10 @@ void TCPServer::HandleClient(SOCKET client) {
         int len = recv(client, buf, sizeof(buf), 0);
         if (len <= 0) break;
         buffer.append(buf, len);
+        if (buffer.size() > 1024 * 1024) {
+            SendResponse(client, BuildError(7, "message too large"));
+            break;
+        }
         size_t nl;
         while ((nl = buffer.find('\n')) != std::string::npos) {
             std::string line = buffer.substr(0, nl);
@@ -184,8 +209,6 @@ void TCPServer::HandleClient(SOCKET client) {
         }
     }
 
-    clientActive_ = false;
-    sessionId_ = 0;
     bool ownsSocket = false;
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
@@ -194,7 +217,13 @@ void TCPServer::HandleClient(SOCKET client) {
             ownsSocket = true;
         }
     }
-    if (ownsSocket) closesocket(client);
+    if (ownsSocket) {
+        clientActive_ = false;
+        sessionId_ = 0;
+        if (fc_) fc_->ResetSession();
+        if (sim_ && sim_->IsSimConnected()) sim_->EnqueueCommand(kEvBrakeRelease);
+        closesocket(client);
+    }
 }
 
 void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
@@ -206,7 +235,12 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
     }
     std::string type = j.str("type");
     if (type == proto::kMsgHello) {
+        if ((int)j.num("protocolVersion", -1) != (int)proto::kProtocolVersion) {
+            SendResponse(client, BuildError(5, "unsupported protocol version"));
+            return;
+        }
         uint32_t sid = RandomSession();
+        if (fc_) fc_->ResetSession();
         sessionId_ = sid;
         bool sim = false;
         std::string aircraft;
@@ -216,20 +250,40 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
             aircraft = p.second;
         }
         SendResponse(client, BuildWelcome(sid, sim, aircraft));
+        // 飞行计划可能早于 iPhone 建立连接；新会话也要收到当前缓存路线。
+        std::string route;
+        {
+            std::lock_guard<std::mutex> lock(routeMtx_);
+            route = lastRouteJson_;
+        }
+        if (!route.empty()) SendResponse(client, route);
         return;
     }
     if (type == proto::kMsgCmd) {
-        if (!sim_) return;
+        if (sessionId_.load() == 0) {
+            SendResponse(client, BuildError(6, "hello required"));
+            return;
+        }
+        if (!sim_ || !sim_->IsSimConnected()) {
+            SendResponse(client, BuildError(8, "MSFS is not connected"));
+            return;
+        }
         std::string name = j.str("name");
-        if (name == proto::kCmdFlapsIncr) sim_->EnqueueCommand(kEvFlapsIncr);
-        else if (name == proto::kCmdFlapsDecr) sim_->EnqueueCommand(kEvFlapsDecr);
-        else if (name == proto::kCmdGear) sim_->EnqueueCommand(kEvGear);
-        else if (name == proto::kCmdTrimUp) sim_->EnqueueCommand(kEvTrimUp);
-        else if (name == proto::kCmdTrimDn) sim_->EnqueueCommand(kEvTrimDn);
-        else if (name == proto::kCmdParking) sim_->EnqueueCommand(kEvParking);
+        int command = -1;
+        if (name == proto::kCmdFlapsIncr) command = kEvFlapsIncr;
+        else if (name == proto::kCmdFlapsDecr) command = kEvFlapsDecr;
+        else if (name == proto::kCmdGear) command = kEvGear;
+        else if (name == proto::kCmdTrimUp) command = kEvTrimUp;
+        else if (name == proto::kCmdTrimDn) command = kEvTrimDn;
+        else if (name == proto::kCmdParking) command = kEvParking;
         else if (name == proto::kCmdBrake)
-            sim_->EnqueueCommand(j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease);
-        else SendResponse(client, BuildError(3, "unknown command: " + name));
+            command = j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease;
+        else {
+            SendResponse(client, BuildError(3, "unknown command: " + name));
+            return;
+        }
+        if (!sim_->EnqueueCommand(command))
+            SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
         return;
     }
     SendResponse(client, BuildError(4, "unknown message type"));
@@ -259,7 +313,7 @@ void TCPServer::SendToClient(const std::string& json) {
     if (!clientActive_.load()) return;
     std::lock_guard<std::mutex> lock(sendMtx_);
     if (clientSock_ == INVALID_SOCKET) return;
-    SendLine(clientSock_, json);
+    if (!SendLine(clientSock_, json)) shutdown(clientSock_, SD_BOTH);
 }
 
 void TCPServer::SendStatus(bool simConnected, const std::string& aircraft) {
@@ -268,6 +322,10 @@ void TCPServer::SendStatus(bool simConnected, const std::string& aircraft) {
 }
 
 void TCPServer::SendRoute(const FlightPlanManager& fp) {
-    if (!clientActive_.load()) return;
-    SendToClient(BuildRoute(fp));
+    std::string route = BuildRoute(fp);
+    {
+        std::lock_guard<std::mutex> lock(routeMtx_);
+        lastRouteJson_ = route;
+    }
+    if (clientActive_.load()) SendToClient(route);
 }

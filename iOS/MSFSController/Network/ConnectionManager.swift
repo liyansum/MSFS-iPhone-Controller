@@ -14,11 +14,13 @@ final class ConnectionManager: ObservableObject {
     @Published var aircraftName = ""
     @Published var flightPlan = FlightPlan()
     @Published var aircraft = AircraftState()
+    @Published private(set) var hasTelemetry = false
     @Published var rttMs: Int?
     @Published var gyroState: GyroArmState = .disarmed
     @Published var lastError: String?
     @Published private(set) var diagnostics: [String] = []
     @Published private(set) var networkStatus = "未知"
+    @Published private(set) var controlResetToken: UInt64 = 0
 
     // MARK: - 内部
 
@@ -32,6 +34,7 @@ final class ConnectionManager: ObservableObject {
 
     private var pendingTestCompletion: ((Bool, String) -> Void)?
     private var connectTimer: DispatchWorkItem?
+    private var connectionAttempt: UInt64 = 0
     private var udpHost = ""
     private var udpPort: UInt16 = 0
     private var controlRate = 60.0
@@ -118,12 +121,35 @@ final class ConnectionManager: ObservableObject {
     // MARK: - 连接
 
     func connect() {
-        connect(host: settings.host, udpPort: settings.udpPort, tcpPort: settings.tcpPort)
+        beginConnection(host: settings.host, udpPort: settings.udpPort,
+                        tcpPort: settings.tcpPort, testCompletion: nil)
     }
 
     func connect(host: String, udpPort: UInt16, tcpPort: UInt16) {
-        disconnect()
-        udpHost = host
+        beginConnection(host: host, udpPort: udpPort, tcpPort: tcpPort, testCompletion: nil)
+    }
+
+    private func beginConnection(host: String, udpPort: UInt16, tcpPort: UInt16,
+                                 testCompletion: ((Bool, String) -> Void)?) {
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedHost.isEmpty else {
+            onMain { [self] in
+                phase = .disconnected
+                lastError = "请先填写 Windows 主机 IP"
+                testCompletion?(false, "主机 IP 为空")
+            }
+            return
+        }
+
+        if let previous = pendingTestCompletion {
+            pendingTestCompletion = nil
+            previous(false, "连接已被新的请求替换")
+        }
+        resetConnectionState(clearError: true)
+        connectionAttempt &+= 1
+        let attempt = connectionAttempt
+        pendingTestCompletion = testCompletion
+        udpHost = normalizedHost
         self.udpPort = udpPort
         controlRate = settings.controlRate
         onMain { [self] in
@@ -131,38 +157,54 @@ final class ConnectionManager: ObservableObject {
             lastError = nil
         }
 
-        tcp.onConnected = { [weak self] in self?.sendHello() }
-        tcp.onDisconnected = { [weak self] _ in self?.handleDisconnected() }
-        tcp.onMessage = { [weak self] data in self?.handleTcpMessage(data) }
+        tcp.onConnected = { [weak self] in
+            self?.onMain { [weak self] in
+                guard let self, self.connectionAttempt == attempt else { return }
+                self.sendHello()
+            }
+        }
+        tcp.onDisconnected = { [weak self] _ in
+            self?.onMain { [weak self] in
+                guard let self, self.connectionAttempt == attempt else { return }
+                self.handleDisconnected()
+            }
+        }
+        tcp.onMessage = { [weak self] data in
+            self?.onMain { [weak self] in
+                guard let self, self.connectionAttempt == attempt else { return }
+                self.handleTcpMessage(data)
+            }
+        }
         tcp.onStateLog = { [weak self] msg in self?.logDiag(msg) }
-        logDiag("connect host=\(host) udp=\(udpPort) tcp=\(tcpPort)")
-        tcp.connect(host: host, port: tcpPort)
+        logDiag("connect #\(attempt) host=\(normalizedHost) udp=\(udpPort) tcp=\(tcpPort)")
+        tcp.connect(host: normalizedHost, port: tcpPort)
 
         connectTimer?.cancel()
         let timer = DispatchWorkItem { [weak self] in
-            self?.handleConnectTimeout()
+            self?.handleConnectTimeout(attempt: attempt)
         }
         connectTimer = timer
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: timer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: timer)
     }
 
     /// 设置页测试连接：成功/失败通过 completion 回调
     func testConnection(host: String, udpPort: UInt16, tcpPort: UInt16,
                         completion: @escaping (Bool, String) -> Void) {
-        // 先登记回调，避免极快的本地连接在赋值前就收到 WELCOME。
-        pendingTestCompletion = completion
-        connect(host: host, udpPort: udpPort, tcpPort: tcpPort)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self = self else { return }
-            if let comp = self.pendingTestCompletion {
-                self.pendingTestCompletion = nil
-                comp(false, "连接超时")
-            }
-        }
+        beginConnection(host: host, udpPort: udpPort, tcpPort: tcpPort,
+                        testCompletion: completion)
     }
 
     func disconnect() {
-        engine.setArmed(false)
+        connectionAttempt &+= 1
+        if let completion = pendingTestCompletion {
+            pendingTestCompletion = nil
+            completion(false, "连接已取消")
+        }
+        resetConnectionState(clearError: false)
+    }
+
+    private func resetConnectionState(clearError: Bool) {
+        releaseAllControls(notifyServer: true)
         motion?.stop()
         motion = nil
         udp.stop()
@@ -175,7 +217,9 @@ final class ConnectionManager: ObservableObject {
             pcConnected = false
             simConnected = false
             rttMs = nil
+            hasTelemetry = false
             gyroState = .disarmed
+            if clearError { lastError = nil }
         }
     }
 
@@ -183,39 +227,82 @@ final class ConnectionManager: ObservableObject {
 
     /// App 进入后台时调用：尽量发送回中，解除武装
     func handleBackground() {
-        if engine.isArmed { disarmGyro() }
-        if let data = engine.zeroAxesPacket() { udp.send(data) }
+        releaseAllControls(notifyServer: true)
     }
 
     /// 切到地图/设置页自动 DISARM
     func autoDisarm() {
-        guard engine.isArmed else { return }
-        disarmGyro()
+        releaseAllControls(notifyServer: true)
+    }
+
+    private func releaseAllControls(notifyServer: Bool) {
+        engine.setArmed(false)
+        engine.cancelTransientInputs()
+        motion?.stop()
+        motion = nil
+        onMain { [weak self] in
+            self?.gyroState = .disarmed
+            self?.controlResetToken &+= 1
+        }
+        guard notifyServer else { return }
+        if let data = engine.zeroAxesPacket() { udp.send(data) }
+        if phase == .connected && simConnected,
+           let json = Self.encode(["type": TcpMsg.cmd,
+                                   "name": TcpCmd.brake,
+                                   "value": false]) {
+            tcp.send(json: json)
+        }
     }
 
     // MARK: - 陀螺仪
 
     func armGyro() {
-        guard phase == .connected else { return }
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "请先启动 MSFS 并等待模拟器连接" }
+            return
+        }
         engine.setArmed(false)
         motion?.stop()
 
         let m = MotionManager()
-        motion = m
-        m.start()
-        m.rawAngles.value = (0, 0)
-        // 收集一个姿态样本后以此为中性
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self = self, self.motion === m else { return }
-            m.recenter()
-            self.engine.setArmed(true)
-            self.gyroState = .armed
-            Haptics.light()
+        guard m.isAvailable else {
+            onMain { [self] in lastError = "此设备无法使用姿态传感器" }
+            return
         }
+        motion = m
+        m.onAngles = { [weak self] pitch, roll in
+            self?.engine.updateRawAngles(pitchDeg: pitch, rollDeg: roll)
+        }
+        m.rawAngles.value = (0, 0)
+        let orientation = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.interfaceOrientation ?? .landscapeLeft
+        m.start(orientation: orientation, recenterOnFirstSample: true,
+                onReady: { [weak self, weak m] in
+                    self?.onMain { [weak self] in
+                        guard let self, let m, self.motion === m,
+                              self.phase == .connected, self.simConnected else { return }
+                        self.engine.setArmed(true)
+                        self.gyroState = .armed
+                        self.lastError = nil
+                        Haptics.light()
+                    }
+                },
+                onError: { [weak self, weak m] message in
+                    self?.onMain { [weak self] in
+                        guard let self, let m, self.motion === m else { return }
+                        m.stop()
+                        self.motion = nil
+                        self.engine.setArmed(false)
+                        self.gyroState = .disarmed
+                        self.lastError = "姿态传感器错误：\(message)"
+                    }
+                })
     }
 
     func disarmGyro() {
         engine.setArmed(false)
+        engine.cancelTransientInputs()
         motion?.stop()
         motion = nil
         gyroState = .disarmed
@@ -225,7 +312,7 @@ final class ConnectionManager: ObservableObject {
 
     func recenter() {
         guard let m = motion else { return }
-        m.recenter()
+        guard m.recenter() else { return }
         engine.setArmed(false)
         engine.setArmed(true)
         Haptics.light()
@@ -233,12 +320,24 @@ final class ConnectionManager: ObservableObject {
 
     // MARK: - 轴输入（由视图调用）
 
-    func beginThrottle(_ v: Float) { engine.beginThrottle(v) }
-    func setThrottle(_ v: Float) { engine.setThrottle(v) }
+    func beginThrottle(_ v: Float) {
+        guard phase == .connected, simConnected else { return }
+        engine.beginThrottle(v)
+    }
+    func setThrottle(_ v: Float) {
+        guard phase == .connected, simConnected else { return }
+        engine.setThrottle(v)
+    }
     func endThrottle() { engine.endThrottle() }
 
-    func beginRudder(_ v: Float) { engine.beginRudder(v) }
-    func setRudder(_ v: Float) { engine.setRudder(v) }
+    func beginRudder(_ v: Float) {
+        guard phase == .connected, simConnected else { return }
+        engine.beginRudder(v)
+    }
+    func setRudder(_ v: Float) {
+        guard phase == .connected, simConnected else { return }
+        engine.setRudder(v)
+    }
     func endRudder() {
         engine.endRudder()
         if let data = engine.zeroRudderPacket() { udp.send(data) }
@@ -249,7 +348,10 @@ final class ConnectionManager: ObservableObject {
     // MARK: - 命令
 
     func sendCommand(_ name: String, value: Bool? = nil) {
-        guard phase == .connected else { return }
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
         var obj: [String: Any] = ["type": TcpMsg.cmd, "name": name]
         if let v = value { obj["value"] = v }
         if let json = Self.encode(obj) { tcp.send(json: json) }
@@ -273,10 +375,16 @@ final class ConnectionManager: ObservableObject {
 
         switch type {
         case TcpMsg.welcome:
+            let version = (obj["protocolVersion"] as? NSNumber)?.uint8Value ?? 0
+            guard version == Proto.protocolVersion else {
+                logDiag("协议版本不匹配: PC=\(version) iOS=\(Proto.protocolVersion)")
+                failCurrentConnection("PC 与 iPhone 协议版本不兼容")
+                return
+            }
             let sid = (obj["sessionId"] as? NSNumber)?.uint32Value ?? 0
             guard sid != 0 else {
                 logDiag("welcome 缺少有效 sessionId")
-                onMain { [self] in lastError = "PC 返回了无效会话" }
+                failCurrentConnection("PC 返回了无效会话")
                 return
             }
             engine.setSession(sid)
@@ -284,6 +392,8 @@ final class ConnectionManager: ObservableObject {
             let name = obj["aircraftName"] as? String ?? ""
             logDiag("welcome: session=\(sid) sim=\(sim) aircraft=\(name)")
             onMain { [self] in
+                connectTimer?.cancel()
+                connectTimer = nil
                 phase = .connected
                 pcConnected = true
                 simConnected = sim
@@ -301,12 +411,22 @@ final class ConnectionManager: ObservableObject {
             let name = obj["aircraftName"] as? String ?? ""
             onMain { [self] in
                 simConnected = sim
-                if !name.isEmpty { aircraftName = name }
+                if !sim { hasTelemetry = false }
+                if !name.isEmpty || !sim { aircraftName = name }
             }
+            if !sim { releaseAllControls(notifyServer: false) }
 
         case TcpMsg.telemetry:
             if let state = try? JSONDecoder().decode(AircraftState.self, from: data) {
-                onMain { [self] in aircraft = state }
+                guard (-90.0...90.0).contains(state.lat),
+                      (-180.0...180.0).contains(state.lon) else {
+                    logDiag("丢弃越界遥测坐标: \(state.lat), \(state.lon)")
+                    return
+                }
+                onMain { [self] in
+                    aircraft = state
+                    hasTelemetry = true
+                }
             }
 
         case TcpMsg.route:
@@ -316,7 +436,9 @@ final class ConnectionManager: ObservableObject {
 
         case TcpMsg.error:
             let msg = obj["message"] as? String ?? "未知错误"
-            onMain { [self] in lastError = msg }
+            logDiag("PC 错误: \(msg)")
+            if phase == .connecting { failCurrentConnection(msg) }
+            else if lastError != msg { lastError = msg }
 
         default:
             break
@@ -324,29 +446,62 @@ final class ConnectionManager: ObservableObject {
     }
 
     private func handleDisconnected() {
-        engine.setArmed(false)
+        releaseAllControls(notifyServer: false)
         engine.setSession(0)
         udp.stop()
         logDiag("TCP 连接断开")
         onMain { [self] in
-            if phase == .connecting { lastError = "无法连接主机，请检查 IP 与端口" }
+            let wasConnecting = phase == .connecting
+            if wasConnecting { lastError = "无法连接主机，请检查 IP、端口及 Windows 防火墙" }
             phase = .disconnected
             pcConnected = false
             simConnected = false
             rttMs = nil
+            hasTelemetry = false
             gyroState = .disarmed
+            connectTimer?.cancel()
+            connectTimer = nil
+            if let completion = pendingTestCompletion {
+                pendingTestCompletion = nil
+                completion(false, lastError ?? "连接已断开")
+            }
         }
     }
 
-    private func handleConnectTimeout() {
-        onMain { [self] in
-            if phase == .connecting {
-                phase = .disconnected
-                lastError = "连接超时，请检查主机 IP 与端口"
-            }
-        }
+    private func failCurrentConnection(_ message: String) {
+        connectionAttempt &+= 1
+        connectTimer?.cancel()
+        connectTimer = nil
+        releaseAllControls(notifyServer: false)
+        engine.setSession(0)
         udp.stop()
         tcp.disconnect()
+        phase = .disconnected
+        pcConnected = false
+        simConnected = false
+        rttMs = nil
+        hasTelemetry = false
+        lastError = message
+        if let completion = pendingTestCompletion {
+            pendingTestCompletion = nil
+            completion(false, message)
+        }
+    }
+
+    private func handleConnectTimeout(attempt: UInt64) {
+        onMain { [self] in
+            guard attempt == connectionAttempt, phase == .connecting else { return }
+            connectionAttempt &+= 1
+            phase = .disconnected
+            lastError = "连接超时，请检查主机 IP、局域网权限及 Windows 防火墙"
+            if let completion = pendingTestCompletion {
+                pendingTestCompletion = nil
+                completion(false, lastError ?? "连接超时")
+            }
+            connectTimer = nil
+            udp.stop()
+            tcp.disconnect()
+        }
     }
 
     // MARK: - UDP
@@ -364,8 +519,11 @@ final class ConnectionManager: ObservableObject {
     }
 
     private func handleUdpPacket(_ data: Data) {
-        guard let pkt = UdpPacket.decode(data), pkt.type == Proto.UdpType.pong.rawValue else { return }
+        guard let pkt = UdpPacket.decode(data),
+              pkt.type == Proto.UdpType.pong.rawValue,
+              engine.matchesSession(pkt.sessionId) else { return }
         let now = UInt64(DispatchTime.now().uptimeNanoseconds) / 1_000_000
+        guard now >= pkt.timestampMs else { return }
         let rtt = Int(now - pkt.timestampMs)
         onMain { [self] in
             if rtt >= 0 && rtt < 10000 { rttMs = rtt }

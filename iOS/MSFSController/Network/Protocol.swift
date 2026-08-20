@@ -19,6 +19,8 @@ enum Proto {
 
     static let axisMin: Int16 = -16383
     static let axisMax: Int16 = 16384
+    static let rudderMin: Int16 = -16383
+    static let rudderMax: Int16 = 16383
     static let throttleMax: UInt16 = 16383
 
     enum UdpType: UInt8 {

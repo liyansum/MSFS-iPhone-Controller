@@ -23,7 +23,9 @@
 #define SIO_UDP_CONNRESET 0x9800000Cu
 #endif
 
+#ifdef _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
+#endif
 
 std::string UDPServer::ControlError() const {
     std::lock_guard<std::mutex> lock(controlErrMtx_);
@@ -45,8 +47,10 @@ void UDPServer::SetDiscoveryError(const std::string& msg) {
     discoveryError_ = msg;
 }
 
-void UDPServer::Start(uint16_t port, SessionCheck check, FlightController* fc, SafetyWatchdog* wd) {
+void UDPServer::Start(uint16_t port, SessionCheck check, ControlEnabled enabled,
+                      FlightController* fc, SafetyWatchdog* wd) {
     check_ = std::move(check);
+    controlEnabled_ = std::move(enabled);
     fc_ = fc;
     wd_ = wd;
     if (running_.load()) return;
@@ -111,7 +115,7 @@ void UDPServer::ThreadMain(uint16_t port) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
-        if (len < (int)sizeof(proto::UdpPacket)) continue;
+        if (len != (int)sizeof(proto::UdpPacket)) continue;
 
         proto::UdpPacket pkt;
         memcpy(&pkt, buf, sizeof(pkt));
@@ -119,12 +123,17 @@ void UDPServer::ThreadMain(uint16_t port) {
 
         if (pkt.type == proto::kUdpControl) {
             if (!check_ || !check_(pkt.sessionId)) continue;
-            if (fc_) {
-                fc_->UpdateFromControl(pkt.sequence, pkt.timestampMs, pkt.axisMask,
-                                       pkt.aileron, pkt.elevator, pkt.rudder, pkt.throttle);
-            }
-            if (wd_) wd_->Touch();
+            if (!controlEnabled_ || !controlEnabled_()) continue;
+            const uint16_t knownAxes = proto::kAxisAileron | proto::kAxisElevator |
+                                       proto::kAxisRudder | proto::kAxisThrottle;
+            if ((pkt.axisMask & ~knownAxes) != 0 || pkt.axisMask == 0) continue;
+            bool accepted = fc_ && fc_->UpdateFromControl(
+                pkt.sequence, pkt.timestampMs, pkt.axisMask,
+                pkt.aileron, pkt.elevator, pkt.rudder, pkt.throttle);
+            // 重复或乱序包不能延长看门狗期限。
+            if (accepted && wd_) wd_->Touch();
         } else if (pkt.type == proto::kUdpPing) {
+            if (!check_ || !check_(pkt.sessionId)) continue;
             pkt.type = proto::kUdpPong;
             sendto(sock, (const char*)&pkt, sizeof(pkt), 0, (sockaddr*)&from, fromLen);
         }

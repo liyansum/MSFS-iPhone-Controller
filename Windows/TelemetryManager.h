@@ -17,6 +17,7 @@ public:
 
     void Push(const AircraftTelemetry& t);
     void SetAircraftName(const std::string& name);
+    void SetSimConnected(bool connected);
 
 private:
     void Loop();
@@ -28,6 +29,7 @@ private:
     std::mutex mtx_;
     AircraftTelemetry latest_;
     std::atomic<bool> hasData_{ false };
+    std::atomic<bool> simConnected_{ false };
     std::mutex nameMtx_;
     std::string aircraftName_;
     uint64_t packetSeq_ = 0;

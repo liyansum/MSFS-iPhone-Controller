@@ -17,6 +17,7 @@ class FlightPlanManager {
 public:
     bool LoadFile(const std::wstring& path);
     bool LoadFile(const std::string& path);
+    void Clear() { wps_.clear(); }
 
     const std::vector<Waypoint>& Waypoints() const { return wps_; }
     std::string Departure() const;

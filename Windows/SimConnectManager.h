@@ -54,7 +54,8 @@ public:
     bool IsSimConnected() const { return simConnected_.load(); }
     std::string AircraftName() const;
 
-    void EnqueueCommand(int cmd, int arg0 = 0);
+    // 模拟器在线时才入队；离线命令不会在稍后重连时意外执行。
+    bool EnqueueCommand(int cmd, int arg0 = 0);
 
     // SimConnect 分发回调（由 SimConnect 线程调用）
     void OnDispatch(void* pData);
@@ -64,13 +65,15 @@ private:
     void ApplyControlState(HANDLE h);
     void DrainCommands(HANDLE h);
     void SendEvent(HANDLE h, DWORD eventId, DWORD value);
-    void BuildDataDefinitions(HANDLE h);
+    bool ConfigureConnection(HANDLE h);
+    void HandleConnectionLost();
 
     std::atomic<bool> running_{ false };
     std::thread thread_;
     HANDLE hSimConnect_ = nullptr;
 
     std::atomic<bool> simConnected_{ false };
+    std::atomic<bool> reconnectRequested_{ false };
     mutable std::mutex titleMtx_;
     std::string aircraftName_;
     std::atomic<uint64_t> telemetrySeq_{ 0 };

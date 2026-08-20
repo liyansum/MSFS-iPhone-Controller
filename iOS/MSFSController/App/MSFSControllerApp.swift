@@ -33,7 +33,11 @@ struct MSFSControllerApp: App {
     }
 
     private func forceLandscape() {
-        UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+        DispatchQueue.main.async {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first else { return }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+        }
     }
 }
 
@@ -49,31 +53,35 @@ struct RootView: View {
     @State private var tab: RootTab = .control
 
     var body: some View {
-        ZStack {
-            TabView(selection: $tab) {
-                ControlView()
-                    .tabItem { Label("CONTROL", systemImage: "gamecontroller") }
-                    .tag(RootTab.control)
-                MapView()
-                    .tabItem { Label("MAP", systemImage: "map") }
-                    .tag(RootTab.map)
-                SettingsView()
-                    .tabItem { Label("SETTINGS", systemImage: "gearshape") }
-                    .tag(RootTab.settings)
-            }
-            .onChange(of: tab) { _, newValue in
-                if newValue != .control { conn.autoDisarm() }
-            }
-
-            // 未连接提示只在 CONTROL 页显示，不遮挡设置/地图页
-            if conn.phase == .disconnected && tab == .control {
-                DisconnectedOverlay(
-                    host: settings.hasHost ? settings.host : "",
-                    lastError: conn.lastError,
-                    onReconnect: { conn.connect() },
-                    onEdit: { tab = .settings }
-                )
-            }
+        TabView(selection: $tab) {
+            ControlView()
+                .id(conn.controlResetToken)
+                .overlay(alignment: .top) {
+                    if conn.phase != .connected {
+                        ConnectionNotice(
+                            connecting: conn.phase == .connecting,
+                            host: settings.hasHost ? settings.host : "",
+                            lastError: conn.lastError,
+                            onReconnect: { conn.connect() },
+                            onEdit: { tab = .settings }
+                        )
+                        .padding(.horizontal, 18)
+                        .padding(.top, 28)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .tabItem { Label("CONTROL", systemImage: "gamecontroller") }
+                .tag(RootTab.control)
+            MapView()
+                .tabItem { Label("MAP", systemImage: "map") }
+                .tag(RootTab.map)
+            SettingsView(onDone: { tab = .control })
+                .tabItem { Label("SETTINGS", systemImage: "gearshape") }
+                .tag(RootTab.settings)
+        }
+        .animation(.easeInOut(duration: 0.2), value: conn.phase)
+        .onChange(of: tab) { _, newValue in
+            if newValue != .control { conn.autoDisarm() }
         }
         .onAppear {
             if settings.hasHost && conn.phase == .disconnected {
@@ -85,42 +93,52 @@ struct RootView: View {
 
 // MARK: - 未连接覆盖层
 
-struct DisconnectedOverlay: View {
+struct ConnectionNotice: View {
+    let connecting: Bool
     let host: String
     let lastError: String?
     let onReconnect: () -> Void
     let onEdit: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("PC 未连接")
-                .font(.title3.bold())
-            Text(host.isEmpty ? "请在设置中填写主机 IP" : "目标主机: \(host)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            if let err = lastError, !err.isEmpty {
-                Text(err)
+        HStack(spacing: 14) {
+            Image(systemName: connecting ? "wifi" : "wifi.slash")
+                .font(.title3)
+                .foregroundStyle(connecting ? .yellow : .orange)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(connecting ? "正在连接 Windows 主机" : "PC 未连接")
+                    .font(.headline)
+                Text(detailText)
                     .font(.caption)
-                    .foregroundColor(.orange)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            HStack(spacing: 20) {
+            Spacer(minLength: 8)
+
+            if !connecting {
                 Button(action: onReconnect) {
-                    Label("重新连接", systemImage: "arrow.clockwise")
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
+                    Label("重连", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button(action: onEdit) {
-                    Label("修改主机", systemImage: "pencil")
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.bordered)
             }
+            Button(action: onEdit) {
+                Label("修改主机", systemImage: "pencil")
+            }
+            .buttonStyle(.bordered)
         }
-        .padding(30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground).opacity(0.96))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
+    }
+
+    private var detailText: String {
+        if let lastError, !lastError.isEmpty { return lastError }
+        return host.isEmpty ? "请打开设置填写或自动发现主机" : "目标主机：\(host)"
     }
 }

@@ -55,10 +55,15 @@ void TelemetryManager::SetAircraftName(const std::string& name) {
     aircraftName_ = name;
 }
 
+void TelemetryManager::SetSimConnected(bool connected) {
+    simConnected_ = connected;
+    hasData_ = false;
+}
+
 void TelemetryManager::Loop() {
     while (running_.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 10 Hz
-        if (!send_ || !hasData_.load()) continue;
+        if (!send_ || !simConnected_.load() || !hasData_.load()) continue;
         AircraftTelemetry t;
         {
             std::lock_guard<std::mutex> lock(mtx_);

@@ -36,8 +36,24 @@ final class ControlEngine {
         return armed
     }
 
+    func matchesSession(_ id: UInt32) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return id != 0 && sessionId == id
+    }
+
     func setSession(_ id: UInt32) {
-        lock.lock(); sessionId = id; lock.unlock()
+        lock.lock()
+        sessionId = id
+        sequence = 0
+        armed = false
+        rawPitchDeg = 0
+        rawRollDeg = 0
+        smoothAileron = 0
+        smoothElevator = 0
+        throttleDragging = false
+        rudderDragging = false
+        rudder = 0
+        lock.unlock()
     }
 
     func updateRawAngles(pitchDeg: Double, rollDeg: Double) {
@@ -74,6 +90,16 @@ final class ControlEngine {
     }
     func endRudder() {
         lock.lock(); rudderDragging = false; rudder = 0; lock.unlock()
+    }
+
+    /// 切页、后台、断线或 MSFS 离线时终止所有瞬时输入。
+    /// 油门数值保留用于 UI，但不再覆盖模拟器；方向舵立即归零。
+    func cancelTransientInputs() {
+        lock.lock()
+        throttleDragging = false
+        rudderDragging = false
+        rudder = 0
+        lock.unlock()
     }
 
     /// 当前陀螺仪显示值（-100..100），供 UI 显示
@@ -121,7 +147,7 @@ final class ControlEngine {
         }
 
         if rudderDragging {
-            rud = Self.axis(rudder)
+            rud = Self.rudderAxis(rudder)
             mask |= Proto.kAxisRudder
         }
         if throttleDragging {
@@ -186,5 +212,12 @@ final class ControlEngine {
         let scaled = clamped * Float(Proto.axisMax)
         let i = Int32(scaled.rounded())
         return Int16(min(max(i, Int32(Proto.axisMin)), Int32(Proto.axisMax)))
+    }
+
+    static func rudderAxis(_ v: Float) -> Int16 {
+        let clamped = min(max(v, -1), 1)
+        let scaled = clamped * Float(Proto.rudderMax)
+        return Int16(min(max(Int32(scaled.rounded()), Int32(Proto.rudderMin)),
+                         Int32(Proto.rudderMax)))
     }
 }
