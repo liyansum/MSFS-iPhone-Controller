@@ -557,7 +557,7 @@ final class ConnectionManager: ObservableObject {
         let obj: [String: Any] = [
             "type": TcpMsg.hello,
             "protocolVersion": Proto.protocolVersion,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.1",
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2",
             "deviceName": UIDevice.current.name,
         ]
         if let json = Self.encode(obj) { tcp.send(json: json) }

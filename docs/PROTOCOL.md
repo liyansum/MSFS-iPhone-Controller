@@ -59,7 +59,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ### iPhone → PC
 
 ```json
-{"type":"hello","protocolVersion":1,"appVersion":"1.1.1","deviceName":"iPhone"}
+{"type":"hello","protocolVersion":1,"appVersion":"1.1.2","deviceName":"iPhone"}
 ```
 
 ```json
@@ -102,7 +102,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ### PC → iPhone
 
 ```json
-{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.1","simConnected":true,"aircraftName":"Cessna 172"}
+{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.2","simConnected":true,"aircraftName":"Cessna 172"}
 ```
 
 ```json
