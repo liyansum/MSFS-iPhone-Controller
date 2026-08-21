@@ -30,6 +30,8 @@ enum : DWORD {
     EV_PARKING,
     EV_BRAKE_LEFT,
     EV_BRAKE_RIGHT,
+    EV_THROTTLE_CUT,
+    EV_AUTOTHROTTLE_DISCONNECT,
     EV_AUTOPILOT_MASTER,
     EV_AUTOPILOT_HEADING_ON,
     EV_AUTOPILOT_HEADING_OFF,
@@ -58,6 +60,7 @@ struct SimData {
     double heading, magneticHeading, pitch, roll;
     double groundSpeed, indicatedAirspeed, verticalSpeed;
     double flapsPercent, elevatorTrim, throttle;
+    double autothrottleActive, autothrottleArmed;
     double gearDown, parkingBrake, onGround, autopilotMaster;
     double autopilotHeadingLock, autopilotNavLock, autopilotHeading;
     double gpsDrivesNav1;
@@ -168,6 +171,8 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     // PCT 的原生规范是 Percent Over 100，直接得到协议要求的 -1..1。
     data(DEF_PLANE, "ELEVATOR TRIM PCT", "percent over 100");
     data(DEF_PLANE, "GENERAL ENG THROTTLE LEVER POSITION:1", "percent");
+    data(DEF_PLANE, "AUTOTHROTTLE ACTIVE", "bool");
+    data(DEF_PLANE, "AUTOPILOT THROTTLE ARM", "bool");
     data(DEF_PLANE, "GEAR HANDLE POSITION", "bool");
     data(DEF_PLANE, "BRAKE PARKING INDICATOR", "bool");
     data(DEF_PLANE, "SIM ON GROUND", "bool");
@@ -213,6 +218,8 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     map(EV_PARKING, "PARKING_BRAKES");
     map(EV_BRAKE_LEFT, "AXIS_LEFT_BRAKE_SET");
     map(EV_BRAKE_RIGHT, "AXIS_RIGHT_BRAKE_SET");
+    map(EV_THROTTLE_CUT, "THROTTLE_CUT");
+    map(EV_AUTOTHROTTLE_DISCONNECT, "AUTO_THROTTLE_DISCONNECT");
     map(EV_AUTOPILOT_MASTER, "AP_MASTER");
     map(EV_AUTOPILOT_HEADING_ON, "AP_HDG_HOLD_ON");
     map(EV_AUTOPILOT_HEADING_OFF, "AP_HDG_HOLD_OFF");
@@ -403,6 +410,13 @@ void SimConnectManager::DrainCommands(HANDLE h) {
             SendEvent(h, EV_BRAKE_RIGHT, static_cast<DWORD>(kBrakeReleased));
             lastBrakeRefreshMs_ = NowMs();
             break;
+        case kEvThrottleIdle:
+            // 0% 是明确的 idle 意图。A/THR 若仍在接管，单纯轴值可能被
+            // 机模重新覆盖；先断开全部发动机自动油门，再执行官方 CUT。
+            SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);
+            SendEvent(h, EV_THROTTLE_CUT, 0);
+            SendEvent(h, EV_THROTTLE, 0);
+            break;
         case kEvAutopilotOn:
             if (!autopilotMaster_) {
                 // AP 接管前先交还中立操纵面，避免最后一个手机姿态包与 AP 争夺控制。
@@ -556,6 +570,8 @@ void SimConnectManager::OnDispatch(void* pData) {
             t.elevatorTrim = d->elevatorTrim;
             // SimConnect 的 percent 单位为 0..100，线协议约定为 0..1。
             t.throttle = std::clamp(d->throttle / 100.0, 0.0, 1.0);
+            t.autothrottleActive = d->autothrottleActive > 0.5;
+            t.autothrottleArmed = d->autothrottleArmed > 0.5;
             t.gearDown = d->gearDown > 0.5;
             t.parkingBrake = d->parkingBrake > 0.5;
             t.onGround = d->onGround > 0.5;

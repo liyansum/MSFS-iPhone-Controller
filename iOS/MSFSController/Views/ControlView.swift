@@ -61,10 +61,12 @@ struct ControlView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             ThrottleView(telemetryThrottle: conn.aircraft.throttle,
+                         autothrottleActive: conn.aircraft.autothrottleActive,
                          enabled: conn.simConnected,
                          onBegin: { conn.beginThrottle($0) },
                          onChange: { conn.setThrottle($0) },
-                         onEnd: { conn.endThrottle() })
+                         onEnd: { conn.endThrottle() },
+                         onIdle: { conn.forceThrottleIdle() })
                 .frame(maxHeight: .infinity)
         }
     }

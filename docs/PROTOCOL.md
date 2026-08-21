@@ -59,7 +59,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ### iPhone → PC
 
 ```json
-{"type":"hello","protocolVersion":1,"appVersion":"1.1.0","deviceName":"iPhone"}
+{"type":"hello","protocolVersion":1,"appVersion":"1.1.1","deviceName":"iPhone"}
 ```
 
 ```json
@@ -70,6 +70,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 {"type":"cmd","name":"trim_dn"}
 {"type":"cmd","name":"parking_brake"}
 {"type":"cmd","name":"brake","value":true}
+{"type":"cmd","name":"throttle_idle"}
 {"type":"cmd","name":"autopilot","value":true}
 {"type":"cmd","name":"autopilot_mode","value":"heading"}
 {"type":"cmd","name":"autopilot_mode","value":"nav"}
@@ -85,19 +86,20 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ```
 
 `brake.value=true` 表示按住刹车，`false` 表示释放。Windows 按住期间持续刷新左右轮制动，松开后短时重复发送完全释放值。
+`throttle_idle` 表示用户明确把手机油门拉到 0%。Windows 会先请求断开全部发动机 A/THR，再执行 `THROTTLE_CUT` 和标准轴 0；iOS 在 A/THR 或实际油门仍高于 idle 时以低频闭环重试。
 `autopilot.value=true` 表示开启自动驾驶总开关，`false` 表示关闭；显示状态以遥测回读为准。
 `autopilot_mode` 在标准 HDG/NAV 横向模式间明确切换，`off` 只关闭横向模式，不关闭 AP Master。
 `autopilot_heading` 设置 0..359 度航向游标；iPhone 的“设定并进入 HDG”会先设置游标再进入 HDG。
 `navigation_source` 在 `gps`（活动飞行计划）与 `nav1`（NAV1 电台）之间明确选择 NAV 的驱动源。
 `autopilot_altitude` 设置 0..60000 ft 高度游标；`autopilot_vertical_mode` 可取 `hold/vs/flc/off`。
 `autopilot_vertical_speed` 设置 -6000..6000 ft/min，`autopilot_speed` 设置 40..400 kt 的 FLC 速度游标。
-`autopilot_approach` 明确预位或取消 APP。`sync_flight_plan` 将 Windows 当前缓存的活动 `.PLN` 重新交给 SimConnect 加载；SDK 对此调用不提供完成回执，因此 iOS 只显示“请求已发送”，最终必须核对机载导航与新的 route/遥测状态。
+`autopilot_approach` 明确预位或取消 APP。`sync_flight_plan` 用于老款 Asobo A320neo 和其他标准 GPS 机型：它将 Windows 当前缓存的活动 `.PLN` 重新交给 SimConnect 加载；SDK 对此调用不提供完成回执，最终必须以机载航路与 NAV 遥测为准。A320neo V2、A32NX、Fenix 等专有 FMGS/FMC 机型不走此导入路径。
 `flaps_incr/flaps_decr` 使用机型原生的上一个/下一个襟翼档位，档位百分比由飞机定义。
 
 ### PC → iPhone
 
 ```json
-{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.0","simConnected":true,"aircraftName":"Cessna 172"}
+{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.1","simConnected":true,"aircraftName":"Cessna 172"}
 ```
 
 ```json
@@ -105,10 +107,10 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ```
 
 ```json
-{"type":"telemetry","lat":31.23,"lon":121.47,"alt":1524.0,"altAgl":500.0,"hdg":273.0,"magHdg":269.0,"pitch":1.2,"roll":-2.3,"gs":56.7,"ias":61.2,"vs":-3.1,"flaps":10.0,"trim":0.18,"throttle":0.63,"gear":false,"parkingBrake":true,"onGround":false,"autopilot":true,"apHeadingLock":true,"apNavLock":false,"apHeading":269.0,"gpsDrivesNav1":true,"apAltitudeLock":false,"apAltitudeArm":true,"apAltitude":10000,"apVerticalHold":true,"apVerticalSpeed":1000,"apFlc":false,"apSpeed":120,"apApproachArm":false,"apApproachActive":false,"apGlideslopeArm":false,"apGlideslopeActive":false,"gpsWpIndex":3,"gpsWpDistance":12.4,"nav1Frequency":109.50,"nav1HasLocalizer":true,"nav1HasGlideslope":true,"brakeLeft":0.0,"brakeRight":0.0,"seq":42,"aircraft":"Cessna 172"}
+{"type":"telemetry","lat":31.23,"lon":121.47,"alt":1524.0,"altAgl":500.0,"hdg":273.0,"magHdg":269.0,"pitch":1.2,"roll":-2.3,"gs":56.7,"ias":61.2,"vs":-3.1,"flaps":10.0,"trim":0.18,"throttle":0.63,"autothrottleActive":true,"autothrottleArmed":true,"gear":false,"parkingBrake":true,"onGround":false,"autopilot":true,"apHeadingLock":true,"apNavLock":false,"apHeading":269.0,"gpsDrivesNav1":true,"apAltitudeLock":false,"apAltitudeArm":true,"apAltitude":10000,"apVerticalHold":true,"apVerticalSpeed":1000,"apFlc":false,"apSpeed":120,"apApproachArm":false,"apApproachActive":false,"apGlideslopeArm":false,"apGlideslopeActive":false,"gpsWpIndex":3,"gpsWpDistance":12.4,"nav1Frequency":109.50,"nav1HasLocalizer":true,"nav1HasGlideslope":true,"brakeLeft":0.0,"brakeRight":0.0,"seq":42,"aircraft":"Cessna 172"}
 ```
 
-遥测字段单位：`alt/altAgl/apAltitude` 英尺，`hdg/magHdg/pitch/roll/apHeading` 度，`gs/ias/vs` 米/秒，`apVerticalSpeed` ft/min，`apSpeed` kt，`gpsWpDistance` NM，`nav1Frequency` MHz，`flaps` 0..100，`trim` -1..1，`throttle/brakeLeft/brakeRight` 0..1。`nav1HasLocalizer/nav1HasGlideslope` 表示当前 NAV1 频率是否具备航向道/下滑道。所有 `ap*Lock/Arm/Active` 字段均是模拟器实际回读，不是按钮的乐观状态。
+遥测字段单位：`alt/altAgl/apAltitude` 英尺，`hdg/magHdg/pitch/roll/apHeading` 度，`gs/ias/vs` 米/秒，`apVerticalSpeed` ft/min，`apSpeed` kt，`gpsWpDistance` NM，`nav1Frequency` MHz，`flaps` 0..100，`trim` -1..1，`throttle/brakeLeft/brakeRight` 0..1。`autothrottleActive/autothrottleArmed` 分别表示 A/THR 实际接管和预位状态；`nav1HasLocalizer/nav1HasGlideslope` 表示当前 NAV1 频率是否具备航向道/下滑道。所有 AP/A/THR 模式字段均是模拟器实际回读，不是按钮的乐观状态。
 
 ```json
 {"type":"route","departure":"ZBAA","destination":"ZSPD","departureRunway":"36L","departureProcedure":"RENOB1","arrivalProcedure":"SASAN2","approachType":"ILS","destinationRunway":"16R","cruisingAltitude":12000,"waypoints":[{"index":0,"ident":"ZBAA","lat":40.0801,"lon":116.5846,"alt":0},{"index":1,"ident":"RENOB","lat":39.823,"lon":116.312,"alt":7200}]}

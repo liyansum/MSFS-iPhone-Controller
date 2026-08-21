@@ -21,6 +21,8 @@ struct AircraftTelemetry {
     double flapsPercent = 0;   // 0..100
     double elevatorTrim = 0;   // -1..1
     double throttle = 0;       // 0..1
+    bool autothrottleActive = false;
+    bool autothrottleArmed = false;
     bool gearDown = false;
     bool parkingBrake = false;
     bool onGround = false;
@@ -60,6 +62,7 @@ enum SimEventCmd {
     kEvParking,
     kEvBrakeHold,
     kEvBrakeRelease,
+    kEvThrottleIdle,
     kEvAutopilotOn,
     kEvAutopilotOff,
     kEvAutopilotHeadingMode,

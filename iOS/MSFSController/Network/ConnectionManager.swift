@@ -328,6 +328,14 @@ final class ConnectionManager: ObservableObject {
     }
     func endThrottle() { engine.endThrottle() }
 
+    /// 用户把手机油门明确拉到 0%：断开可能仍在接管的 A/THR，并强制 idle。
+    func forceThrottleIdle() {
+        guard phase == .connected, simConnected else { return }
+        engine.setThrottle(0)
+        sendControlImmediately()
+        sendCommand(TcpCmd.throttleIdle)
+    }
+
     func beginRudder(_ v: Float) {
         guard phase == .connected, simConnected else { return }
         engine.beginRudder(v)
@@ -425,10 +433,12 @@ final class ConnectionManager: ObservableObject {
             lastError = "没有可同步的活动航路"
             return
         }
+        if usesExternalFmsRoute {
+            routeSyncMessage = "当前机型使用专有 FMGS/FMC，请先在机内导入或设置航路"
+            return
+        }
         sendCommand(TcpCmd.syncFlightPlan)
-        routeSyncMessage = isA320neoV2
-            ? "已请求将世界地图航路载入 A320neo V2；请核对 MCDU 航路"
-            : "已请求将当前 .PLN 重新载入标准 GPS"
+        routeSyncMessage = "已请求将当前 .PLN 重新载入标准 GPS"
     }
 
     func flyHeading(_ degrees: Int) {
@@ -438,9 +448,12 @@ final class ConnectionManager: ObservableObject {
     }
 
     func followRoute(syncFirst: Bool) {
-        if syncFirst { syncFlightPlan() }
-        setNavigationSource("gps")
-        let delay = syncFirst ? 0.8 : 0
+        let shouldSyncStandardGps = syncFirst && !usesExternalFmsRoute
+        if shouldSyncStandardGps { syncFlightPlan() }
+        // 老款 Asobo A320neo 可走标准活动 .PLN/GPS 流程；V2 与第三方客机
+        // 使用专有 FMGS/FMC，GPS DRIVES NAV1 不能用于写入其 MCDU。
+        if !usesExternalFmsRoute { setNavigationSource("gps") }
+        let delay = shouldSyncStandardGps ? 0.8 : 0
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, self.phase == .connected, self.simConnected else { return }
             self.setAutopilotMode("nav")
@@ -470,10 +483,8 @@ final class ConnectionManager: ObservableObject {
     }
 
     func prepareApproach() {
-        let shouldReloadA320Plan = isA320neoV2 && !flightPlan.waypoints.isEmpty
-        if shouldReloadA320Plan { syncFlightPlan() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (shouldReloadA320Plan ? 0.8 : 0)) {
-            [weak self] in
+        // 只预位已在机载导航中配置的进近，不再重新加载标准 .PLN。
+        DispatchQueue.main.async { [weak self] in
             guard let self, self.phase == .connected, self.simConnected else { return }
             self.setAutopilotApproach(true)
             self.setAutopilot(true)
@@ -482,7 +493,28 @@ final class ConnectionManager: ObservableObject {
 
     var isA320neoV2: Bool {
         let title = aircraftName.lowercased()
-        return title.contains("a320") && (title.contains("neo") || title.contains("airbus"))
+        return title.contains("a320") &&
+            (title.contains("v2") || title.contains("ini builds") || title.contains("inibuilds"))
+    }
+
+    /// 主要支持目标：MSFS 2020 原始 Asobo/Legacy A320neo，而不是 A320neo V2。
+    var isLegacyA320neo: Bool {
+        let title = aircraftName.lowercased()
+        guard title.contains("a320"), title.contains("neo") else { return false }
+        return !usesExternalFmsRoute
+    }
+
+    /// 这些机型的专有 FMGS/FMC 航路不能按标准 GPS `.PLN` 路径可靠写入。
+    var usesExternalFmsRoute: Bool {
+        let title = aircraftName.lowercased()
+        return isA320neoV2 || title.contains("flybywire") || title.contains("a32nx") ||
+            title.contains("fenix")
+    }
+
+    var aircraftProfileLabel: String {
+        if isLegacyA320neo { return "老款 A320neo · 标准航路适配" }
+        if usesExternalFmsRoute { return "专有 FMGS/FMC · 仅后续 AP" }
+        return "标准 GPS / SimConnect"
     }
 
     private func sendNumericCommand(_ name: String, value: Int) {
@@ -509,7 +541,7 @@ final class ConnectionManager: ObservableObject {
         let obj: [String: Any] = [
             "type": TcpMsg.hello,
             "protocolVersion": Proto.protocolVersion,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0",
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.1",
             "deviceName": UIDevice.current.name,
         ]
         if let json = Self.encode(obj) { tcp.send(json: json) }

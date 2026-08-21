@@ -59,6 +59,10 @@ void TestJsonParserInitializesResult() {
           "autopilot approach command was not parsed");
     Check(approach.boolean("value", false), "autopilot approach value was lost");
 
+    Json idle = Json::parse(R"({"type":"cmd","name":"throttle_idle"})", ok);
+    Check(ok && idle.str("name") == proto::kCmdThrottleIdle,
+          "throttle idle command was not parsed");
+
     Json invalid = Json::parse(R"({"type":)", ok);
     Check(!ok, "invalid JSON accepted");
     Check(invalid.isNull(), "invalid JSON did not return null");

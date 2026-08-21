@@ -15,7 +15,7 @@ constexpr uint16_t kDiscoveryPort = 36668;    // 自动探测（UDP 广播，iPh
 // ---------- 版本 ----------
 constexpr uint32_t kMagic = 0x4D534631;       // "MSF1"
 constexpr uint8_t  kProtocolVersion = 1;
-constexpr char     kServerVersion[] = "1.1.0";
+constexpr char     kServerVersion[] = "1.1.1";
 
 // UDP 包类型（第 5 字节，flags/type 字段）
 enum UdpType : uint8_t {
@@ -74,6 +74,7 @@ constexpr char kCmdTrimUp[]    = "trim_up";
 constexpr char kCmdTrimDn[]    = "trim_dn";
 constexpr char kCmdParking[]   = "parking_brake";
 constexpr char kCmdBrake[]     = "brake";     // 需携带 value(bool)：按住 true / 松开 false
+constexpr char kCmdThrottleIdle[] = "throttle_idle"; // 明确断开 A/THR 并将全部发动机置于 idle
 constexpr char kCmdAutopilot[] = "autopilot"; // 需携带 value(bool)：明确开启 / 关闭
 constexpr char kCmdAutopilotMode[] = "autopilot_mode";       // value: heading/nav/off
 constexpr char kCmdAutopilotHeading[] = "autopilot_heading"; // value: 0..359 度

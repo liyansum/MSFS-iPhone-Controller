@@ -9,7 +9,7 @@ enum Proto {
     static let defaultTcpPort: UInt16 = 36667
     static let discoveryPort: UInt16 = 36668
     static let controlTimeout: TimeInterval = 0.25
-    static let serverVersion = "1.1.0"
+    static let serverVersion = "1.1.1"
     static let discoveryRequest = "MSFS_DISCOVER\n"
 
     static let kAxisAileron: UInt16 = 1 << 0
@@ -99,6 +99,7 @@ enum TcpCmd {
     static let trimDn = "trim_dn"
     static let parkingBrake = "parking_brake"
     static let brake = "brake"
+    static let throttleIdle = "throttle_idle"
     static let autopilot = "autopilot"
     static let autopilotMode = "autopilot_mode"
     static let autopilotHeading = "autopilot_heading"

@@ -22,6 +22,8 @@ std::string FormatTelemetry(const AircraftTelemetry& t, const std::string& aircr
        << ",\"flaps\":" << t.flapsPercent
        << ",\"trim\":" << t.elevatorTrim
        << ",\"throttle\":" << t.throttle
+       << ",\"autothrottleActive\":" << (t.autothrottleActive ? "true" : "false")
+       << ",\"autothrottleArmed\":" << (t.autothrottleArmed ? "true" : "false")
        << ",\"gear\":" << (t.gearDown ? "true" : "false")
        << ",\"parkingBrake\":" << (t.parkingBrake ? "true" : "false")
        << ",\"onGround\":" << (t.onGround ? "true" : "false")

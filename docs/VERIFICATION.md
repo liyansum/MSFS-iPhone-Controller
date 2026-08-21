@@ -41,7 +41,9 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
 5. 拖动 Rudder 后松手必须回中；操作 Throttle 后应持续保持手机目标，直至 App
    后台或断线。Trim、Flaps、Gear、Parking Brake、Autopilot 状态必须以 MSFS
    回读为准。关闭 GYRO 后继续把油门依次设为 0%、50%、100%，实际 SIM 数值应
-   跟随且 GYRO 状态不影响油门。Flaps± 应切换飞机自身的合法档位。
+   跟随且 GYRO 状态不影响油门。再接通 A320 A/THR，使其实际推力高于 50%，把手机
+   油门拉到 0%：A/THR 应断开，实际 `SIM` 油门应在数秒内保持低于 3%，不能反弹至
+   90%。Flaps± 应切换飞机自身的合法档位。
 6. 按住 Brake 后松手必须释放，按钮显示的左右轮实际制动应回到 5% 以下。按住期间
    切页、锁屏、断开 TCP 或关闭手机 Wi-Fi，刹车必须释放，Aileron/Elevator/Rudder
    必须在 250 ms 左右回中。
@@ -50,10 +52,10 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    不要求重新 ARM。
 8. MSFS 退出或重启时，iPhone 控件应禁用并 DISARM；重连后不得补执行离线期间
    点击的命令，必须重新 ARM 才能恢复姿态控制。
-9. AUTOPILOT 页设置目标航向并进入 HDG 后，飞机航向游标、HDG 指示和手机回读应一致；
+9. AUTOPILOT 页应依次显示“飞机状态、起飞阶段、飞行阶段、降落阶段”。设置目标航向并进入 HDG 后，飞机航向游标、HDG 指示和手机回读应一致；
    分别选择 GPS/NAV1 并核对机内 CDI 来源，切到 NAV 后 HDG 应关闭、NAV 应激活，
    切到 OFF 只关闭横向模式。AP Master 状态必须由模拟器回读确认。至少用
-   默认 A320neo V2 验证完整流程；再用 Cessna 172 验证标准事件降级流程。
+   老款 Asobo/Legacy A320neo 验证完整流程；再用 Cessna 172 验证标准事件降级流程。
 10. 分别执行“保持当前高度”“按升降率前往目标”“按速度前往目标”，核对目标高度、
     VS/FLC、目标速度及 ALT ARM/ACTIVE 的模拟器回读。目标在当前高度以下时，快捷 VS
     必须自动使用负值；FLC 飞机没有自动油门时，App 必须提示手动调油门。
@@ -70,16 +72,19 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    iPhone 出现。逐个点击航点，核对名称、经纬度和计划高度。
 4. Windows 或 iPhone 重连后，当前已缓存航路应再次发送；激活另一份 `.PLN`
    后应自动替换旧航路。
-5. AUTOPILOT 页应显示与 MAP 相同的起点、终点和航点列表；NAV 只跟随 MSFS 当前
-   激活的标准航路，不应声称可以通用编辑第三方客机的专有 FMC。
-6. A320neo V2：在世界地图中选好跑道、SID、STAR 和进近后进入航班，App 应解析并
-   显示这些 `.PLN` 元数据。“同步航路到机载导航”后必须人工核对 MCDU；由于
-   `SimConnect_FlightPlanLoad` 没有完成回执，不得仅凭按钮点击显示同步成功。
+5. AUTOPILOT 页应显示与 MAP 相同的标准 `.PLN` 起点、终点和航点；不得把该列表
+   标成 A320 MCDU 内部航路，也不应声称可以通用编辑第三方客机的专有 FMC。
+6. 老款 Asobo/Legacy A320neo：在世界地图激活包含 SID/STAR/进近的 `.PLN`，App
+   应识别为“老款 A320neo · 标准航路适配”。点击“同步并跟随 GPS 航路”后人工核对
+   机载 F-PLN 航点，并等待 NAV 实际回读；由于 `SimConnect_FlightPlanLoad` 没有完成
+   回执，不得仅凭点击显示同步成功。A320neo V2/A32NX/Fenix 应显示专有 FMS 提示，
+   不得误称已把标准 `.PLN` 写入其 MCDU。
 
 ## 长时间与异常验收
 
 - 连续运行至少 60 分钟，观察 TCP/UDP 状态、内存、地图航迹和操纵延迟。
 - 分别测试 Wi-Fi 丢包、路由器漫游、PC 网络切换、PC 程序重启、MSFS 重启、
   iPhone 锁屏和 App 前后台切换。
-- 主要验收机型使用默认 A320neo V2；另用 Cessna 172 验证标准事件降级路径。
+- 主要验收机型使用 MSFS 2020 老款 Asobo/Legacy A320neo；另用 Cessna 172 验证
+  标准事件降级路径。
   复杂第三方飞机若覆盖标准 SimConnect 事件，需要单独的 Aircraft Profile。

@@ -18,6 +18,8 @@ struct AircraftState: Identifiable, Decodable, Equatable {
     var flapsPercent: Double = 0  // 0..100
     var elevatorTrim: Double = 0  // -1..1
     var throttle: Double = 0      // 0..1
+    var autothrottleActive: Bool = false
+    var autothrottleArmed: Bool = false
     var gearDown: Bool = false
     var parkingBrake: Bool = false
     var onGround: Bool = false
@@ -48,7 +50,7 @@ struct AircraftState: Identifiable, Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case lat, lon, alt, altAgl, hdg, magHdg, pitch, roll
-        case gs, ias, vs, flaps, trim, throttle
+        case gs, ias, vs, flaps, trim, throttle, autothrottleActive, autothrottleArmed
         case gear, parkingBrake, onGround, autopilot
         case apHeadingLock, apNavLock, apHeading, gpsDrivesNav1
         case apAltitudeLock, apAltitudeArm, apAltitude
@@ -78,6 +80,8 @@ struct AircraftState: Identifiable, Decodable, Equatable {
         flapsPercent = min(max(try c.decodeIfPresent(Double.self, forKey: .flaps) ?? 0, 0), 100)
         elevatorTrim = min(max(try c.decodeIfPresent(Double.self, forKey: .trim) ?? 0, -1), 1)
         throttle = min(max(try c.decodeIfPresent(Double.self, forKey: .throttle) ?? 0, 0), 1)
+        autothrottleActive = try c.decodeIfPresent(Bool.self, forKey: .autothrottleActive) ?? false
+        autothrottleArmed = try c.decodeIfPresent(Bool.self, forKey: .autothrottleArmed) ?? false
         gearDown = try c.decodeIfPresent(Bool.self, forKey: .gear) ?? false
         parkingBrake = try c.decodeIfPresent(Bool.self, forKey: .parkingBrake) ?? false
         onGround = try c.decodeIfPresent(Bool.self, forKey: .onGround) ?? false
