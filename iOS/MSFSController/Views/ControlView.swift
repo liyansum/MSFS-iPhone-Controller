@@ -21,9 +21,14 @@ struct ControlView: View {
                 trimSection
                     .frame(width: 120)
             }
+            .frame(minHeight: 0, maxHeight: .infinity)
+            .layoutPriority(1)
+            .clipped()
             rudderSection
                 .frame(height: 56)
+                .fixedSize(horizontal: false, vertical: true)
             bottomRow
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .onReceive(timer) { _ in
@@ -56,17 +61,12 @@ struct ControlView: View {
     // MARK: - 油门
 
     private var throttleSection: some View {
-        VStack(spacing: 4) {
-            Text("THROTTLE")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            ThrottleView(telemetryThrottle: conn.aircraft.throttle,
-                         autothrottleActive: conn.aircraft.autothrottleActive,
-                         enabled: conn.simConnected,
-                         onDecrease: { conn.decreaseThrottle() },
-                         onIncrease: { conn.increaseThrottle() })
-                .frame(maxHeight: .infinity)
-        }
+        ThrottleView(telemetryThrottle: conn.aircraft.throttle,
+                     autothrottleActive: conn.aircraft.autothrottleActive,
+                     enabled: conn.simConnected,
+                     onDecrease: { conn.decreaseThrottle() },
+                     onIncrease: { conn.increaseThrottle() })
+            .frame(maxHeight: .infinity)
     }
 
     // MARK: - 陀螺仪

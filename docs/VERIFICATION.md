@@ -41,6 +41,7 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
 5. 拖动 Rudder 后松手必须回中。点击 Throttle − / + 时，每次应先断开 A/THR，
    再将全部发动机油门减小/增大 10%；按住约 0.4 秒后应连续变化，松手、断线或切页
    必须立即停止。中间百分比必须始终显示 `SIM` 实际回读。
+   在较矮的横屏 iPhone 上，油门按钮不得侵入 RUDDER、BRAKE、底部命令行或 Tab Bar。
    停止点击后 iPhone 不得继续发送油门轴或保存目标，驾驶舱、实体油门和 A/THR 的
    后续变化应正常回显。关闭 GYRO 后按钮仍必须有效。Trim、Flaps、Gear、Parking
    Brake、Autopilot 状态必须以 MSFS 回读为准。Flaps± 应切换机型合法档位。

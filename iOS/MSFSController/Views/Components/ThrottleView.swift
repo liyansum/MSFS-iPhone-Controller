@@ -11,38 +11,29 @@ struct ThrottleView: View {
     let onIncrease: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
-            ThrottleRepeatButton(title: "油门 +", systemImage: "plus",
+        VStack(spacing: 4) {
+            ThrottleRepeatButton(title: "+10%", systemImage: "plus",
                                  color: .blue, enabled: enabled,
                                  action: onIncrease)
 
-            Spacer(minLength: 4)
-
-            VStack(spacing: 5) {
-                Text("SIM 实际油门")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text("\(Int(min(max(telemetryThrottle, 0), 1) * 100))%")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+            VStack(spacing: 1) {
+                Text("SIM \(Int(min(max(telemetryThrottle, 0), 1) * 100))%")
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                Text("点按 10% · 按住连续")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
                 if autothrottleActive {
-                    Text("A/THR ON · 点击后转手动")
+                    Text("A/THR ON")
                         .font(.caption2.bold())
                         .foregroundColor(.orange)
-                        .multilineTextAlignment(.center)
                 }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
 
-            Spacer(minLength: 4)
-
-            ThrottleRepeatButton(title: "油门 −", systemImage: "minus",
+            ThrottleRepeatButton(title: "−10%", systemImage: "minus",
                                  color: .indigo, enabled: enabled,
                                  action: onDecrease)
         }
-        .padding(8)
+        .padding(4)
         .background(RoundedRectangle(cornerRadius: 10)
             .fill(Color(.secondarySystemBackground)))
         .disabled(!enabled)
@@ -64,9 +55,11 @@ private struct ThrottleRepeatButton: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.headline)
+            .font(.caption.bold())
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             .foregroundColor(.white)
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
             .background(RoundedRectangle(cornerRadius: 9)
                 .fill(color.opacity(pressed ? 0.65 : 1)))
             .scaleEffect(pressed ? 0.97 : 1)

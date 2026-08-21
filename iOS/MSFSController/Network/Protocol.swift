@@ -9,7 +9,7 @@ enum Proto {
     static let defaultTcpPort: UInt16 = 36667
     static let discoveryPort: UInt16 = 36668
     static let controlTimeout: TimeInterval = 0.25
-    static let serverVersion = "1.1.3"
+    static let serverVersion = "1.1.4"
     static let discoveryRequest = "MSFS_DISCOVER\n"
 
     static let kAxisAileron: UInt16 = 1 << 0
