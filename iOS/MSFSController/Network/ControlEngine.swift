@@ -91,7 +91,14 @@ final class ControlEngine {
         throttle = min(max(v, 0), 1)
         lock.unlock()
     }
-    func endThrottle() {}
+    /// 松手后返回最终目标并释放实时 UDP 轴；最终值由 TCP 可靠提交。
+    func endThrottle() -> Float {
+        lock.lock()
+        throttleActive = false
+        let finalValue = throttle
+        lock.unlock()
+        return finalValue
+    }
 
     func beginRudder(_ v: Float) {
         lock.lock(); rudderDragging = true; rudder = min(max(v, -1), 1); lock.unlock()
@@ -162,8 +169,8 @@ final class ControlEngine {
             rud = Self.rudderAxis(rudder)
             mask |= Proto.kAxisRudder
         }
-        // 手机一旦操作油门，就像实体油门轴一样持续占用目标值，直到后台/断线。
-        // 仅在松手后短暂重发会让机模、辅助功能或旧遥测很快覆盖手机输入。
+        // 只在拖动期间实时占用；松手由可靠 TCP 提交最终值后释放，避免与
+        // A/THR、驾驶舱操作或实体油门长期争夺同一控制轴。
         if throttleActive {
             thr = UInt16(min(max(throttle, 0), 1) * Float(Proto.throttleMax))
             mask |= Proto.kAxisThrottle

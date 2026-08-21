@@ -62,6 +62,8 @@ enum SimEventCmd {
     kEvParking,
     kEvBrakeHold,
     kEvBrakeRelease,
+    kEvThrottleTakeover,
+    kEvThrottleSet,
     kEvThrottleIdle,
     kEvAutopilotOn,
     kEvAutopilotOff,

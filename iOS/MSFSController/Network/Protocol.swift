@@ -99,6 +99,8 @@ enum TcpCmd {
     static let trimDn = "trim_dn"
     static let parkingBrake = "parking_brake"
     static let brake = "brake"
+    static let throttleTakeover = "throttle_takeover"
+    static let throttleSet = "throttle_set"
     static let throttleIdle = "throttle_idle"
     static let autopilot = "autopilot"
     static let autopilotMode = "autopilot_mode"

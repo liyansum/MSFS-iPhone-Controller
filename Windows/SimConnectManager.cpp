@@ -410,6 +410,16 @@ void SimConnectManager::DrainCommands(HANDLE h) {
             SendEvent(h, EV_BRAKE_RIGHT, static_cast<DWORD>(kBrakeReleased));
             lastBrakeRefreshMs_ = NowMs();
             break;
+        case kEvThrottleTakeover:
+            SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);
+            break;
+        case kEvThrottleSet:
+            // TCP 可靠提交松手时的最终值，并释放手机 UDP 轴所有权。
+            SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);
+            SendEvent(h, EV_THROTTLE,
+                      static_cast<DWORD>(std::clamp(c.arg0, 0,
+                                                   static_cast<int>(proto::kThrottleMax))));
+            break;
         case kEvThrottleIdle:
             // 0% 是明确的 idle 意图。A/THR 若仍在接管，单纯轴值可能被
             // 机模重新覆盖；先断开全部发动机自动油门，再执行官方 CUT。

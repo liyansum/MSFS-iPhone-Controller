@@ -284,6 +284,17 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
         else if (name == proto::kCmdParking) command = kEvParking;
         else if (name == proto::kCmdBrake)
             command = j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease;
+        else if (name == proto::kCmdThrottleTakeover) command = kEvThrottleTakeover;
+        else if (name == proto::kCmdThrottleSet) {
+            const double value = j.num("value", -1);
+            if (value < 0 || value > proto::kThrottleMax) {
+                SendResponse(client, BuildError(7, "throttle must be 0..16383"));
+                return;
+            }
+            if (!sim_->EnqueueCommand(kEvThrottleSet, static_cast<int>(value + 0.5)))
+                SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
+            return;
+        }
         else if (name == proto::kCmdThrottleIdle) command = kEvThrottleIdle;
         else if (name == proto::kCmdAutopilot)
             command = j.boolean("value", false) ? kEvAutopilotOn : kEvAutopilotOff;

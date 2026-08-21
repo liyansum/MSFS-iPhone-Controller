@@ -318,6 +318,8 @@ final class ConnectionManager: ObservableObject {
 
     func beginThrottle(_ v: Float) {
         guard phase == .connected, simConnected else { return }
+        // 手指操作代表明确请求手动推力，先解除可能仍在接管的 A/THR。
+        takeOverThrottle()
         engine.beginThrottle(v)
         sendControlImmediately()
     }
@@ -326,7 +328,21 @@ final class ConnectionManager: ObservableObject {
         engine.setThrottle(v)
         sendControlImmediately()
     }
-    func endThrottle() { engine.endThrottle() }
+    func endThrottle() {
+        let finalValue = engine.endThrottle()
+        guard phase == .connected, simConnected else { return }
+        if finalValue <= 0.015 {
+            // 已释放实时轴，只通过 TCP 可靠提交 idle，不能再次激活持续 UDP 油门。
+            sendCommand(TcpCmd.throttleIdle)
+        } else {
+            sendNumericCommand(TcpCmd.throttleSet,
+                               value: Int((finalValue * Float(Proto.throttleMax)).rounded()))
+        }
+    }
+
+    func takeOverThrottle() {
+        sendCommand(TcpCmd.throttleTakeover)
+    }
 
     /// 用户把手机油门明确拉到 0%：断开可能仍在接管的 A/THR，并强制 idle。
     func forceThrottleIdle() {

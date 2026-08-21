@@ -63,6 +63,12 @@ void TestJsonParserInitializesResult() {
     Check(ok && idle.str("name") == proto::kCmdThrottleIdle,
           "throttle idle command was not parsed");
 
+    Json throttle = Json::parse(
+        R"({"type":"cmd","name":"throttle_set","value":8192})", ok);
+    Check(ok && throttle.str("name") == proto::kCmdThrottleSet,
+          "throttle set command was not parsed");
+    Check(throttle.num("value", -1) == 8192, "throttle set value was lost");
+
     Json invalid = Json::parse(R"({"type":)", ok);
     Check(!ok, "invalid JSON accepted");
     Check(invalid.isNull(), "invalid JSON did not return null");

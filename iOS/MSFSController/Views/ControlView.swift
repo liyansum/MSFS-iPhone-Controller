@@ -66,6 +66,7 @@ struct ControlView: View {
                          onBegin: { conn.beginThrottle($0) },
                          onChange: { conn.setThrottle($0) },
                          onEnd: { conn.endThrottle() },
+                         onTakeover: { conn.takeOverThrottle() },
                          onIdle: { conn.forceThrottleIdle() })
                 .frame(maxHeight: .infinity)
         }
