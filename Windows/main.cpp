@@ -26,6 +26,7 @@
 #include <string>
 #include <chrono>
 #include <atomic>
+#include <algorithm>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -101,7 +102,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
               &fc, &watchdog);
 
     // ---------- TCP 状态与命令 ----------
-    tcp.Start(proto::kDefaultTcpPort, &sim, &fc, &flightPlan,
+    tcp.Start(proto::kDefaultTcpPort, &sim, &fc,
               [&]() {
                   StatusStore::Snapshot s = status.Take();
                   return std::make_pair(s.simConnected, s.aircraft);
@@ -130,14 +131,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrev*/, LPWSTR /*lpCmd*/, 
                 status.SetNetwork(error.empty() ? "Starting listeners..." : "ERROR: " + error);
             }
 
-            long long last = watchdog.LastControlMs();
-            if (last > 0) {
-                status.SetLastControlAge(NowMs() - last);
+            const long long last = watchdog.LastControlMs();
+            if (phone && last > 0) {
+                // timestampMs 来自 iPhone，仅用于 Pong 原样回显；两台设备的
+                // steady clock 没有共同起点。控制包年龄必须完全使用 Windows
+                // 本地 Touch 时间，并避免异常负值。
+                status.SetLastControlAge(std::max(0LL, NowMs() - last));
             } else {
                 status.SetLastControlAge(-1);
             }
             status.SetWatchdogFired(watchdog.IsExpired());
-            if (phone) status.SetStatus("Ready");
+            if (phone) {
+                status.SetStatus(watchdog.IsExpired()
+                    ? "Realtime control idle; transient axes centered"
+                    : "Ready");
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });

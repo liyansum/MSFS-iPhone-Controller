@@ -271,9 +271,11 @@ void AppWindow::Paint(HDC dc) {
                   Utf8ToWide(snapshot_.aircraft), bodyFont_, valueFont_); y += rowHeight;
     DrawStatusRow(dc, left, y, rowHeight, labelWidth, L"飞行计划",
                   Utf8ToWide(snapshot_.flightPlan), bodyFont_, valueFont_); y += rowHeight;
-    std::wstring age = snapshot_.lastControlAgeMs < 0
-        ? L"--" : std::to_wstring(snapshot_.lastControlAgeMs) + L" ms";
-    DrawStatusRow(dc, left, y, rowHeight, labelWidth, L"控制包年龄", age,
+    std::wstring age;
+    if (snapshot_.lastControlAgeMs < 0) age = L"--";
+    else if (snapshot_.watchdogFired) age = L"无实时输入";
+    else age = std::to_wstring(snapshot_.lastControlAgeMs) + L" ms";
+    DrawStatusRow(dc, left, y, rowHeight, labelWidth, L"实时控制包", age,
                   bodyFont_, valueFont_,
                   snapshot_.lastControlAgeMs >= 0 && snapshot_.watchdogFired ? kWarn : kText); y += rowHeight;
     std::wstring statusText = snapshot_.simConnected

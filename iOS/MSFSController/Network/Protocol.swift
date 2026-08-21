@@ -9,7 +9,7 @@ enum Proto {
     static let defaultTcpPort: UInt16 = 36667
     static let discoveryPort: UInt16 = 36668
     static let controlTimeout: TimeInterval = 0.25
-    static let serverVersion = "1.0.1"
+    static let serverVersion = "1.1.0"
     static let discoveryRequest = "MSFS_DISCOVER\n"
 
     static let kAxisAileron: UInt16 = 1 << 0
@@ -100,6 +100,15 @@ enum TcpCmd {
     static let parkingBrake = "parking_brake"
     static let brake = "brake"
     static let autopilot = "autopilot"
+    static let autopilotMode = "autopilot_mode"
+    static let autopilotHeading = "autopilot_heading"
+    static let navigationSource = "navigation_source"
+    static let autopilotAltitude = "autopilot_altitude"
+    static let autopilotVerticalMode = "autopilot_vertical_mode"
+    static let autopilotVerticalSpeed = "autopilot_vertical_speed"
+    static let autopilotSpeed = "autopilot_speed"
+    static let autopilotApproach = "autopilot_approach"
+    static let syncFlightPlan = "sync_flight_plan"
 }
 
 // MARK: - 小端编解码辅助

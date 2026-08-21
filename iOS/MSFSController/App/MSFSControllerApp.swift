@@ -55,7 +55,7 @@ struct MSFSControllerApp: App {
 // MARK: - 根视图
 
 enum RootTab: Hashable {
-    case control, map, settings
+    case control, flight, map, settings
 }
 
 struct RootView: View {
@@ -86,6 +86,9 @@ struct RootView: View {
             MapView()
                 .tabItem { Label("MAP", systemImage: "map") }
                 .tag(RootTab.map)
+            FlightView()
+                .tabItem { Label("AUTOPILOT", systemImage: "airplane") }
+                .tag(RootTab.flight)
             SettingsView(onDone: { tab = .control })
                 .tabItem { Label("SETTINGS", systemImage: "gearshape") }
                 .tag(RootTab.settings)

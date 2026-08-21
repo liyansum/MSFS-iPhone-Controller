@@ -31,14 +31,17 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
 1. PC 与 iPhone 接入同一路由器，关闭 VPN；Windows 程序应显示 TCP 36667、
    UDP 36666/36668 均已监听。若 Windows 防火墙未放行，点击“一键放行局域网”。
 2. iPhone 设置页自动探测应显示 Windows 主机；手动输入推荐 IPv4 也应能连接。
-   确认 PC/MSFS 双状态和 RTT 每秒更新。
+   确认 PC/MSFS 双状态和 RTT 每秒更新。Windows 的“实时控制包”在有姿态或油门
+   输入时应显示很小的本机收包年龄；输入停止并触发看门狗后应显示“无实时输入”，
+   不得把 iPhone 与 Windows 的单调时钟直接相减或无限显示巨大的毫秒数。
 3. ARM 后保持手机不动，副翼和升降舵应为中立；向左/右倾斜只控制副翼，
    前/后倾斜只控制升降舵。分别在 Landscape Left/Right 下验证方向一致。
 4. RECENTER 后当前握持姿势应立即成为中立；Deadzone、Expo、Sensitivity、
    Smoothing 与 Invert 设置应即时生效。
 5. 拖动 Rudder 后松手必须回中；操作 Throttle 后应持续保持手机目标，直至 App
    后台或断线。Trim、Flaps、Gear、Parking Brake、Autopilot 状态必须以 MSFS
-   回读为准。Flaps± 应切换飞机自身的上一个/下一个合法档位。
+   回读为准。关闭 GYRO 后继续把油门依次设为 0%、50%、100%，实际 SIM 数值应
+   跟随且 GYRO 状态不影响油门。Flaps± 应切换飞机自身的合法档位。
 6. 按住 Brake 后松手必须释放，按钮显示的左右轮实际制动应回到 5% 以下。按住期间
    切页、锁屏、断开 TCP 或关闭手机 Wi-Fi，刹车必须释放，Aileron/Elevator/Rudder
    必须在 250 ms 左右回中。
@@ -47,6 +50,15 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    不要求重新 ARM。
 8. MSFS 退出或重启时，iPhone 控件应禁用并 DISARM；重连后不得补执行离线期间
    点击的命令，必须重新 ARM 才能恢复姿态控制。
+9. AUTOPILOT 页设置目标航向并进入 HDG 后，飞机航向游标、HDG 指示和手机回读应一致；
+   分别选择 GPS/NAV1 并核对机内 CDI 来源，切到 NAV 后 HDG 应关闭、NAV 应激活，
+   切到 OFF 只关闭横向模式。AP Master 状态必须由模拟器回读确认。至少用
+   默认 A320neo V2 验证完整流程；再用 Cessna 172 验证标准事件降级流程。
+10. 分别执行“保持当前高度”“按升降率前往目标”“按速度前往目标”，核对目标高度、
+    VS/FLC、目标速度及 ALT ARM/ACTIVE 的模拟器回读。目标在当前高度以下时，快捷 VS
+    必须自动使用负值；FLC 飞机没有自动油门时，App 必须提示手动调油门。
+11. APP 按下后先显示预位；只有 `AUTOPILOT APPROACH ACTIVE` 和
+    `AUTOPILOT GLIDESLOPE ACTIVE` 回读后，才能分别显示 LOC/GS 已截获。
 
 ## 真机地图与航路验收
 
@@ -58,11 +70,16 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    iPhone 出现。逐个点击航点，核对名称、经纬度和计划高度。
 4. Windows 或 iPhone 重连后，当前已缓存航路应再次发送；激活另一份 `.PLN`
    后应自动替换旧航路。
+5. AUTOPILOT 页应显示与 MAP 相同的起点、终点和航点列表；NAV 只跟随 MSFS 当前
+   激活的标准航路，不应声称可以通用编辑第三方客机的专有 FMC。
+6. A320neo V2：在世界地图中选好跑道、SID、STAR 和进近后进入航班，App 应解析并
+   显示这些 `.PLN` 元数据。“同步航路到机载导航”后必须人工核对 MCDU；由于
+   `SimConnect_FlightPlanLoad` 没有完成回执，不得仅凭按钮点击显示同步成功。
 
 ## 长时间与异常验收
 
 - 连续运行至少 60 分钟，观察 TCP/UDP 状态、内存、地图航迹和操纵延迟。
 - 分别测试 Wi-Fi 丢包、路由器漫游、PC 网络切换、PC 程序重启、MSFS 重启、
   iPhone 锁屏和 App 前后台切换。
-- 标准验收机型使用 Cessna 172。复杂第三方飞机若覆盖标准 SimConnect 事件，
-  需要单独的 Aircraft Profile，不属于 V1 标准事件兼容范围。
+- 主要验收机型使用默认 A320neo V2；另用 Cessna 172 验证标准事件降级路径。
+  复杂第三方飞机若覆盖标准 SimConnect 事件，需要单独的 Aircraft Profile。

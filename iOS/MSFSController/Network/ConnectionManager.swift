@@ -21,6 +21,7 @@ final class ConnectionManager: ObservableObject {
     @Published private(set) var diagnostics: [String] = []
     @Published private(set) var networkStatus = "未知"
     @Published private(set) var controlResetToken: UInt64 = 0
+    @Published private(set) var routeSyncMessage = ""
 
     // MARK: - 内部
 
@@ -219,6 +220,7 @@ final class ConnectionManager: ObservableObject {
             rttMs = nil
             hasTelemetry = false
             gyroState = .disarmed
+            routeSyncMessage = ""
             if clearError { lastError = nil }
         }
     }
@@ -297,11 +299,10 @@ final class ConnectionManager: ObservableObject {
 
     func disarmGyro() {
         engine.setArmed(false)
-        engine.cancelTransientInputs()
         motion?.stop()
         motion = nil
         gyroState = .disarmed
-        if let data = engine.zeroAxesPacket() { udp.send(data) }
+        if let data = engine.zeroGyroAxesPacket() { udp.send(data) }
         Haptics.light()
     }
 
@@ -318,10 +319,12 @@ final class ConnectionManager: ObservableObject {
     func beginThrottle(_ v: Float) {
         guard phase == .connected, simConnected else { return }
         engine.beginThrottle(v)
+        sendControlImmediately()
     }
     func setThrottle(_ v: Float) {
         guard phase == .connected, simConnected else { return }
         engine.setThrottle(v)
+        sendControlImmediately()
     }
     func endThrottle() { engine.endThrottle() }
 
@@ -362,13 +365,151 @@ final class ConnectionManager: ObservableObject {
         sendCommand(TcpCmd.autopilot, value: enabled)
     }
 
+    func setAutopilotMode(_ mode: String) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        let obj: [String: Any] = ["type": TcpMsg.cmd,
+                                  "name": TcpCmd.autopilotMode,
+                                  "value": mode]
+        if let json = Self.encode(obj) { tcp.send(json: json) }
+    }
+
+    func setAutopilotHeading(_ degrees: Int) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        let normalized = ((degrees % 360) + 360) % 360
+        let obj: [String: Any] = ["type": TcpMsg.cmd,
+                                  "name": TcpCmd.autopilotHeading,
+                                  "value": normalized]
+        if let json = Self.encode(obj) { tcp.send(json: json) }
+    }
+
+    func setNavigationSource(_ source: String) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        let obj: [String: Any] = ["type": TcpMsg.cmd,
+                                  "name": TcpCmd.navigationSource,
+                                  "value": source]
+        if let json = Self.encode(obj) { tcp.send(json: json) }
+    }
+
+    func setAutopilotAltitude(_ feet: Int) {
+        sendNumericCommand(TcpCmd.autopilotAltitude, value: min(max(feet, 0), 60_000))
+    }
+
+    func setAutopilotVerticalSpeed(_ feetPerMinute: Int) {
+        sendNumericCommand(TcpCmd.autopilotVerticalSpeed,
+                           value: min(max(feetPerMinute, -6_000), 6_000))
+    }
+
+    func setAutopilotSpeed(_ knots: Int) {
+        sendNumericCommand(TcpCmd.autopilotSpeed, value: min(max(knots, 40), 400))
+    }
+
+    func setAutopilotVerticalMode(_ mode: String) {
+        sendStringCommand(TcpCmd.autopilotVerticalMode, value: mode)
+    }
+
+    func setAutopilotApproach(_ enabled: Bool) {
+        sendCommand(TcpCmd.autopilotApproach, value: enabled)
+    }
+
+    func syncFlightPlan() {
+        guard !flightPlan.waypoints.isEmpty else {
+            lastError = "没有可同步的活动航路"
+            return
+        }
+        sendCommand(TcpCmd.syncFlightPlan)
+        routeSyncMessage = isA320neoV2
+            ? "已请求将世界地图航路载入 A320neo V2；请核对 MCDU 航路"
+            : "已请求将当前 .PLN 重新载入标准 GPS"
+    }
+
+    func flyHeading(_ degrees: Int) {
+        setAutopilotHeading(degrees)
+        setAutopilotMode("heading")
+        setAutopilot(true)
+    }
+
+    func followRoute(syncFirst: Bool) {
+        if syncFirst { syncFlightPlan() }
+        setNavigationSource("gps")
+        let delay = syncFirst ? 0.8 : 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.phase == .connected, self.simConnected else { return }
+            self.setAutopilotMode("nav")
+            self.setAutopilot(true)
+        }
+    }
+
+    func holdCurrentAltitude() {
+        let target = Int((aircraft.altitude / 100).rounded() * 100)
+        setAutopilotAltitude(target)
+        setAutopilotVerticalMode("hold")
+        setAutopilot(true)
+    }
+
+    func flyVerticalSpeed(targetAltitude: Int, feetPerMinute: Int) {
+        setAutopilotAltitude(targetAltitude)
+        setAutopilotVerticalSpeed(feetPerMinute)
+        setAutopilotVerticalMode("vs")
+        setAutopilot(true)
+    }
+
+    func flyFlightLevelChange(targetAltitude: Int, speedKnots: Int) {
+        setAutopilotAltitude(targetAltitude)
+        setAutopilotSpeed(speedKnots)
+        setAutopilotVerticalMode("flc")
+        setAutopilot(true)
+    }
+
+    func prepareApproach() {
+        let shouldReloadA320Plan = isA320neoV2 && !flightPlan.waypoints.isEmpty
+        if shouldReloadA320Plan { syncFlightPlan() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (shouldReloadA320Plan ? 0.8 : 0)) {
+            [weak self] in
+            guard let self, self.phase == .connected, self.simConnected else { return }
+            self.setAutopilotApproach(true)
+            self.setAutopilot(true)
+        }
+    }
+
+    var isA320neoV2: Bool {
+        let title = aircraftName.lowercased()
+        return title.contains("a320") && (title.contains("neo") || title.contains("airbus"))
+    }
+
+    private func sendNumericCommand(_ name: String, value: Int) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        let obj: [String: Any] = ["type": TcpMsg.cmd, "name": name, "value": value]
+        if let json = Self.encode(obj) { tcp.send(json: json) }
+    }
+
+    private func sendStringCommand(_ name: String, value: String) {
+        guard phase == .connected, simConnected else {
+            onMain { [weak self] in self?.lastError = "MSFS 尚未连接，命令未发送" }
+            return
+        }
+        let obj: [String: Any] = ["type": TcpMsg.cmd, "name": name, "value": value]
+        if let json = Self.encode(obj) { tcp.send(json: json) }
+    }
+
     // MARK: - TCP
 
     private func sendHello() {
         let obj: [String: Any] = [
             "type": TcpMsg.hello,
             "protocolVersion": Proto.protocolVersion,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1",
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0",
             "deviceName": UIDevice.current.name,
         ]
         if let json = Self.encode(obj) { tcp.send(json: json) }
@@ -437,7 +578,10 @@ final class ConnectionManager: ObservableObject {
 
         case TcpMsg.route:
             if let fp = Self.parseRoute(obj) {
-                onMain { [self] in flightPlan = fp }
+                onMain { [self] in
+                    if fp != flightPlan { routeSyncMessage = "" }
+                    flightPlan = fp
+                }
             }
 
         case TcpMsg.error:
@@ -524,6 +668,10 @@ final class ConnectionManager: ObservableObject {
         }
     }
 
+    private func sendControlImmediately() {
+        if let data = engine.makeControlPacket() { udp.send(data) }
+    }
+
     private func handleUdpPacket(_ data: Data) {
         guard let pkt = UdpPacket.decode(data),
               pkt.type == Proto.UdpType.pong.rawValue,
@@ -559,6 +707,12 @@ final class ConnectionManager: ObservableObject {
         }
         return FlightPlan(departure: obj["departure"] as? String ?? "",
                           destination: obj["destination"] as? String ?? "",
+                          departureRunway: obj["departureRunway"] as? String ?? "",
+                          departureProcedure: obj["departureProcedure"] as? String ?? "",
+                          arrivalProcedure: obj["arrivalProcedure"] as? String ?? "",
+                          approachType: obj["approachType"] as? String ?? "",
+                          destinationRunway: obj["destinationRunway"] as? String ?? "",
+                          cruisingAltitude: (obj["cruisingAltitude"] as? NSNumber)?.doubleValue ?? 0,
                           waypoints: list)
     }
 }

@@ -16,7 +16,7 @@
 struct AircraftTelemetry {
     double lat = 0, lon = 0;
     double altitude = 0, altAgl = 0;
-    double heading = 0, pitch = 0, roll = 0;
+    double heading = 0, magneticHeading = 0, pitch = 0, roll = 0;
     double groundSpeed = 0, indicatedAirspeed = 0, verticalSpeed = 0;
     double flapsPercent = 0;   // 0..100
     double elevatorTrim = 0;   // -1..1
@@ -25,6 +25,26 @@ struct AircraftTelemetry {
     bool parkingBrake = false;
     bool onGround = false;
     bool autopilotMaster = false;
+    bool autopilotHeadingLock = false;
+    bool autopilotNavLock = false;
+    double autopilotHeading = 0; // 0..359 degrees
+    bool gpsDrivesNav1 = false;
+    bool autopilotAltitudeLock = false;
+    bool autopilotAltitudeArm = false;
+    double autopilotAltitude = 0; // feet
+    bool autopilotVerticalHold = false;
+    double autopilotVerticalSpeed = 0; // feet/minute
+    bool autopilotFlightLevelChange = false;
+    double autopilotSpeed = 0; // knots
+    bool autopilotApproachArm = false;
+    bool autopilotApproachActive = false;
+    bool autopilotGlideslopeArm = false;
+    bool autopilotGlideslopeActive = false;
+    int gpsWaypointIndex = 0;
+    double gpsWaypointDistance = 0; // nautical miles
+    double nav1Frequency = 0; // MHz
+    bool nav1HasLocalizer = false;
+    bool nav1HasGlideslope = false;
     double brakeLeft = 0;        // 0..1
     double brakeRight = 0;       // 0..1
     uint64_t seq = 0;
@@ -42,6 +62,22 @@ enum SimEventCmd {
     kEvBrakeRelease,
     kEvAutopilotOn,
     kEvAutopilotOff,
+    kEvAutopilotHeadingMode,
+    kEvAutopilotNavMode,
+    kEvAutopilotLateralOff,
+    kEvAutopilotHeadingSet,
+    kEvNavigationSourceGps,
+    kEvNavigationSourceNav1,
+    kEvAutopilotAltitudeSet,
+    kEvAutopilotAltitudeHold,
+    kEvAutopilotVerticalSpeedSet,
+    kEvAutopilotVerticalSpeedMode,
+    kEvAutopilotFlightLevelChangeMode,
+    kEvAutopilotVerticalOff,
+    kEvAutopilotSpeedSet,
+    kEvAutopilotApproachOn,
+    kEvAutopilotApproachOff,
+    kEvSyncFlightPlan,
 };
 
 class SimConnectManager {
@@ -58,6 +94,7 @@ public:
 
     bool IsSimConnected() const { return simConnected_.load(); }
     std::string AircraftName() const;
+    bool HasActiveFlightPlan() const;
 
     // 模拟器在线时才入队；离线命令不会在稍后重连时意外执行。
     bool EnqueueCommand(int cmd, int arg0 = 0);
@@ -87,6 +124,16 @@ private:
     long long lastBrakeRefreshMs_ = 0;
     long long brakeReleaseUntilMs_ = 0;
     bool autopilotMaster_ = false;
+    bool autopilotHeadingLock_ = false;
+    bool autopilotNavLock_ = false;
+    bool gpsDrivesNav1_ = false;
+    bool autopilotAltitudeLock_ = false;
+    bool autopilotVerticalHold_ = false;
+    bool autopilotFlightLevelChange_ = false;
+    bool autopilotApproach_ = false;
+
+    mutable std::mutex activePlanMtx_;
+    std::string activeFlightPlanPath_;
 
     struct Cmd { int cmd; int arg0; };
     std::deque<Cmd> cmdQueue_;

@@ -12,6 +12,7 @@
 #include <sstream>
 #include <cstring>
 #include <chrono>
+#include <cmath>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
@@ -48,7 +49,13 @@ std::string BuildRoute(const FlightPlanManager& fp) {
     os << "{\"type\":\"" << proto::kMsgRoute
        << "\",\"departure\":\"" << Json::escape(fp.Departure())
        << "\",\"destination\":\"" << Json::escape(fp.Destination())
-       << "\",\"waypoints\":[";
+       << "\",\"departureRunway\":\"" << Json::escape(fp.DepartureRunway())
+       << "\",\"departureProcedure\":\"" << Json::escape(fp.DepartureProcedure())
+       << "\",\"arrivalProcedure\":\"" << Json::escape(fp.ArrivalProcedure())
+       << "\",\"approachType\":\"" << Json::escape(fp.ApproachType())
+       << "\",\"destinationRunway\":\"" << Json::escape(fp.DestinationRunway())
+       << "\",\"cruisingAltitude\":" << fp.CruisingAltitude()
+       << ",\"waypoints\":[";
     const auto& wps = fp.Waypoints();
     for (size_t i = 0; i < wps.size(); ++i) {
         if (i) os << ",";
@@ -83,10 +90,9 @@ void TCPServer::SetError(const std::string& message) {
 }
 
 void TCPServer::Start(uint16_t port, SimConnectManager* sim, FlightController* fc,
-                      FlightPlanManager* fp, StatusGetter status) {
+                      StatusGetter status) {
     sim_ = sim;
     fc_ = fc;
-    fp_ = fp;
     status_ = std::move(status);
     if (started_.load()) return;
     SetError("");
@@ -280,6 +286,83 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
             command = j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease;
         else if (name == proto::kCmdAutopilot)
             command = j.boolean("value", false) ? kEvAutopilotOn : kEvAutopilotOff;
+        else if (name == proto::kCmdAutopilotMode) {
+            const std::string mode = j.str("value");
+            if (mode == "heading") command = kEvAutopilotHeadingMode;
+            else if (mode == "nav") command = kEvAutopilotNavMode;
+            else if (mode == "off") command = kEvAutopilotLateralOff;
+            else {
+                SendResponse(client, BuildError(7, "invalid autopilot mode"));
+                return;
+            }
+        } else if (name == proto::kCmdAutopilotHeading) {
+            const double rawHeading = j.num("value", -1);
+            if (rawHeading < 0 || rawHeading >= 360) {
+                SendResponse(client, BuildError(7, "autopilot heading must be 0..359"));
+                return;
+            }
+            command = kEvAutopilotHeadingSet;
+            if (!sim_->EnqueueCommand(command, static_cast<int>(rawHeading + 0.5)))
+                SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
+            return;
+        } else if (name == proto::kCmdNavigationSource) {
+            const std::string source = j.str("value");
+            if (source == "gps") command = kEvNavigationSourceGps;
+            else if (source == "nav1") command = kEvNavigationSourceNav1;
+            else {
+                SendResponse(client, BuildError(7, "invalid navigation source"));
+                return;
+            }
+        } else if (name == proto::kCmdAutopilotAltitude) {
+            const double value = j.num("value", -1);
+            if (value < 0 || value > 60000) {
+                SendResponse(client, BuildError(7, "autopilot altitude must be 0..60000 feet"));
+                return;
+            }
+            command = kEvAutopilotAltitudeSet;
+            if (!sim_->EnqueueCommand(command, static_cast<int>(value + 0.5)))
+                SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
+            return;
+        } else if (name == proto::kCmdAutopilotVerticalSpeed) {
+            const double value = j.num("value", 99999);
+            if (value < -6000 || value > 6000) {
+                SendResponse(client, BuildError(7, "autopilot vertical speed must be -6000..6000"));
+                return;
+            }
+            command = kEvAutopilotVerticalSpeedSet;
+            if (!sim_->EnqueueCommand(command, static_cast<int>(std::round(value))))
+                SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
+            return;
+        } else if (name == proto::kCmdAutopilotSpeed) {
+            const double value = j.num("value", -1);
+            if (value < 40 || value > 400) {
+                SendResponse(client, BuildError(7, "autopilot speed must be 40..400 knots"));
+                return;
+            }
+            command = kEvAutopilotSpeedSet;
+            if (!sim_->EnqueueCommand(command, static_cast<int>(value + 0.5)))
+                SendResponse(client, BuildError(8, "MSFS disconnected before command execution"));
+            return;
+        } else if (name == proto::kCmdAutopilotVerticalMode) {
+            const std::string mode = j.str("value");
+            if (mode == "hold") command = kEvAutopilotAltitudeHold;
+            else if (mode == "vs") command = kEvAutopilotVerticalSpeedMode;
+            else if (mode == "flc") command = kEvAutopilotFlightLevelChangeMode;
+            else if (mode == "off") command = kEvAutopilotVerticalOff;
+            else {
+                SendResponse(client, BuildError(7, "invalid autopilot vertical mode"));
+                return;
+            }
+        } else if (name == proto::kCmdAutopilotApproach) {
+            command = j.boolean("value", false)
+                ? kEvAutopilotApproachOn : kEvAutopilotApproachOff;
+        } else if (name == proto::kCmdSyncFlightPlan) {
+            if (!sim_->HasActiveFlightPlan()) {
+                SendResponse(client, BuildError(9, "no active flight plan to synchronize"));
+                return;
+            }
+            command = kEvSyncFlightPlan;
+        }
         else {
             SendResponse(client, BuildError(3, "unknown command: " + name));
             return;

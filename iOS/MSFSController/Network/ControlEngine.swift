@@ -194,7 +194,7 @@ final class ControlEngine {
                          axisMask: 0, aileron: 0, elevator: 0, rudder: 0, throttle: 0).encode()
     }
 
-    /// 回中包：Aileron/Elevator/Rudder 置 0（用于 DISARM / 后台）
+    /// 回中包：Aileron/Elevator/Rudder 置 0（用于后台 / 断线）
     func zeroAxesPacket() -> Data? {
         lock.lock(); defer { lock.unlock() }
         guard sessionId != 0 else { return nil }
@@ -205,6 +205,19 @@ final class ControlEngine {
                          timestampMs: nowMs(),
                          sessionId: sessionId,
                          axisMask: mask,
+                         aileron: 0, elevator: 0, rudder: 0, throttle: 0).encode()
+    }
+
+    /// 仅交还陀螺仪控制的姿态轴。关闭 GYRO 不得清除油门或方向舵所有权。
+    func zeroGyroAxesPacket() -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        guard sessionId != 0 else { return nil }
+        sequence &+= 1
+        return UdpPacket(type: Proto.UdpType.control.rawValue,
+                         sequence: sequence,
+                         timestampMs: nowMs(),
+                         sessionId: sessionId,
+                         axisMask: Proto.kAxisAileron | Proto.kAxisElevator,
                          aileron: 0, elevator: 0, rudder: 0, throttle: 0).encode()
     }
 

@@ -3,8 +3,12 @@ name: build
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -23,14 +27,19 @@ jobs:
       - name: Test core protocol
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          Compress-Archive -Force `
+            -Path build/Release/MSFSiPhoneController.exe,build/Release/SimConnect.dll `
+            -DestinationPath MSFSiPhoneController-Windows-x64.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MSFSiPhoneController-Windows
-          path: |
-            build/Release/MSFSiPhoneController.exe
-            build/Release/SimConnect.dll
-          if-no-files-found: warn
+          path: MSFSiPhoneController-Windows-x64.zip
+          if-no-files-found: error
 
   ios:
     name: iOS (Xcode Release)
@@ -78,4 +87,44 @@ jobs:
         with:
           name: MSFSController-iOS
           path: MSFSController.ipa
-          if-no-files-found: warn
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: MSFSiPhoneController-Windows
+          path: release-assets/windows
+
+      - name: Download iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: MSFSController-iOS
+          path: release-assets/ios
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              release-assets/windows/MSFSiPhoneController-Windows-x64.zip \
+              release-assets/ios/MSFSController.ipa \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              release-assets/windows/MSFSiPhoneController-Windows-x64.zip \
+              release-assets/ios/MSFSController.ipa \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "MSFS iPhone Controller $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

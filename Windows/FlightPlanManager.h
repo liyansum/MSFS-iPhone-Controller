@@ -17,11 +17,17 @@ class FlightPlanManager {
 public:
     bool LoadFile(const std::wstring& path);
     bool LoadFile(const std::string& path);
-    void Clear() { wps_.clear(); }
+    void Clear();
 
     const std::vector<Waypoint>& Waypoints() const { return wps_; }
     std::string Departure() const;
     std::string Destination() const;
+    const std::string& DepartureRunway() const { return departureRunway_; }
+    const std::string& DepartureProcedure() const { return departureProcedure_; }
+    const std::string& ArrivalProcedure() const { return arrivalProcedure_; }
+    const std::string& ApproachType() const { return approachType_; }
+    const std::string& DestinationRunway() const { return destinationRunway_; }
+    double CruisingAltitude() const { return cruisingAltitude_; }
     std::string Summary() const;   // "ZBAA -> ZSPD"
 
 private:
@@ -29,4 +35,12 @@ private:
     static bool ParseWorldPosition(const std::string& token, double& lat, double& lon);
 
     std::vector<Waypoint> wps_;
+    std::string departureId_;
+    std::string destinationId_;
+    std::string departureRunway_;
+    std::string departureProcedure_;
+    std::string arrivalProcedure_;
+    std::string approachType_;
+    std::string destinationRunway_;
+    double cruisingAltitude_ = 0;
 };

@@ -71,6 +71,23 @@ std::string XmlUnescape(std::string value) {
     return value;
 }
 
+std::string TagValue(const std::string& xml, const char* tag) {
+    const std::regex re("<" + std::string(tag) + R"(\s*>([^<]*)</)" +
+                        std::string(tag) + R"(\s*>)", std::regex_constants::icase);
+    std::smatch match;
+    return std::regex_search(xml, match, re) ? XmlUnescape(match[1].str()) : "";
+}
+
+std::string RunwayName(const std::string& number, const std::string& designator) {
+    if (number.empty()) return "";
+    std::string suffix;
+    if (designator == "LEFT") suffix = "L";
+    else if (designator == "RIGHT") suffix = "R";
+    else if (designator == "CENTER") suffix = "C";
+    else if (!designator.empty() && designator != "NONE") suffix = designator;
+    return number + suffix;
+}
+
 } // namespace
 
 bool FlightPlanManager::LoadFile(const std::wstring& path) {
@@ -85,11 +102,25 @@ bool FlightPlanManager::LoadFile(const std::string& path) {
 }
 
 std::string FlightPlanManager::Departure() const {
+    if (!departureId_.empty()) return departureId_;
     return wps_.empty() ? "" : wps_.front().ident;
 }
 
 std::string FlightPlanManager::Destination() const {
+    if (!destinationId_.empty()) return destinationId_;
     return wps_.empty() ? "" : wps_.back().ident;
+}
+
+void FlightPlanManager::Clear() {
+    wps_.clear();
+    departureId_.clear();
+    destinationId_.clear();
+    departureRunway_.clear();
+    departureProcedure_.clear();
+    arrivalProcedure_.clear();
+    approachType_.clear();
+    destinationRunway_.clear();
+    cruisingAltitude_ = 0;
 }
 
 std::string FlightPlanManager::Summary() const {
@@ -99,7 +130,14 @@ std::string FlightPlanManager::Summary() const {
 }
 
 void FlightPlanManager::ParseXml(const std::string& xml) {
-    wps_.clear();
+    Clear();
+    departureId_ = TagValue(xml, "DepartureID");
+    destinationId_ = TagValue(xml, "DestinationID");
+    departureRunway_ = TagValue(xml, "DeparturePosition");
+    try {
+        const std::string altitude = TagValue(xml, "CruisingAlt");
+        if (!altitude.empty()) cruisingAltitude_ = std::stod(altitude);
+    } catch (...) {}
 
     static const std::regex reBlock(
         R"(<ATCWaypoint\b([^>]*)>([\s\S]*?)</ATCWaypoint\s*>)",
@@ -115,10 +153,27 @@ void FlightPlanManager::ParseXml(const std::string& xml) {
     static const std::regex reAltitude(R"(([+-]\d+(?:\.\d+)?)\s*$)");
 
     int index = 0;
+    std::string firstRunway;
+    std::string lastRunway;
     for (std::sregex_iterator m(xml.begin(), xml.end(), reBlock);
          m != std::sregex_iterator(); ++m) {
         const std::string attributes = (*m)[1].str();
         const std::string block = (*m)[2].str();
+
+        const std::string departureProcedure = TagValue(block, "DepartureFP");
+        const std::string arrivalProcedure = TagValue(block, "ArrivalFP");
+        const std::string approachType = TagValue(block, "ApproachTypeFP");
+        const std::string runway = RunwayName(TagValue(block, "RunwayNumberFP"),
+                                              TagValue(block, "RunwayDesignatorFP"));
+        if (!departureProcedure.empty()) departureProcedure_ = departureProcedure;
+        if (!arrivalProcedure.empty()) arrivalProcedure_ = arrivalProcedure;
+        if (!approachType.empty()) approachType_ = approachType;
+        if (!runway.empty()) {
+            if (firstRunway.empty()) firstRunway = runway;
+            lastRunway = runway;
+            if (!departureProcedure.empty()) departureRunway_ = runway;
+            if (!arrivalProcedure.empty() || !approachType.empty()) destinationRunway_ = runway;
+        }
 
         Waypoint wp;
         wp.index = index;
@@ -153,6 +208,9 @@ void FlightPlanManager::ParseXml(const std::string& xml) {
             wps_.push_back(std::move(wp));
         }
     }
+    if (departureRunway_.empty()) departureRunway_ = firstRunway;
+    if (destinationRunway_.empty() && lastRunway != firstRunway)
+        destinationRunway_ = lastRunway;
 }
 
 bool FlightPlanManager::ParseWorldPosition(const std::string& token, double& lat, double& lon) {

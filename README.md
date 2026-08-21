@@ -3,7 +3,7 @@
 [![Build](https://github.com/liyansum/MSFS-iPhone-Controller/actions/workflows/build.yml/badge.svg)](https://github.com/liyansum/MSFS-iPhone-Controller/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/liyansum/MSFS-iPhone-Controller)](https://github.com/liyansum/MSFS-iPhone-Controller/releases)
 
-将 iPhone 变成 Microsoft Flight Simulator 2020 的无线飞行控制器。手机通过局域网连接 Windows 伴侣程序，使用陀螺仪控制副翼和升降舵，并提供油门、方向舵、襟翼、刹车、起落架、自动驾驶开关、地图和飞行计划显示。
+将 iPhone 变成 Microsoft Flight Simulator 2020 的无线飞行控制器。手机通过局域网连接 Windows 伴侣程序，使用陀螺仪控制副翼和升降舵，并提供油门、方向舵、襟翼、刹车、起落架、自动驾驶、地图和飞行计划显示。
 
 ## 功能
 
@@ -14,6 +14,8 @@
 - 持续占用目标值的油门滑杆、自动回中的方向舵、升降舵配平和机型原生襟翼档位。
 - 按住式左右轮刹车、驻车制动、起落架及自动驾驶总开关。
 - 自动驾驶开启时暂停手机姿态轴，关闭后恢复原有 GYRO ARM 状态。
+- 独立 AUTOPILOT 页：以“往哪里飞、飞多高、如何爬升/下降、准备降落”控制 HDG/NAV、ALT/VS/FLC 和 APP，并显示 ARM/ACTIVE 实际状态。
+- 可重新加载世界地图当前 `.PLN`，显示跑道、SID、STAR、进近和航点；以默认 A320neo V2 为主要适配机型，其他机型使用标准 SimConnect 降级流程。
 - MapKit 飞行地图、飞机位置与航向、实际航迹、MSFS 当前飞行计划和航点信息。
 - 前台飞行控制期间保持屏幕常亮，避免自动锁屏造成断连。
 
@@ -75,8 +77,11 @@ iOS 首次启动会请求本地网络和运动传感器权限，必须允许，�
 | PARKING / PARKED | 切换驻车制动，显示状态来自 MSFS 回读 |
 | GEAR | 切换起落架 |
 | AP ON / AP OFF | 开启或关闭自动驾驶总开关，状态来自 MSFS 回读 |
+| AUTOPILOT | 一键航向/跟随航线、目标高度、VS/FLC、APP 进近和航路同步 |
 
-复杂第三方飞机可能使用自定义机模事件，因此个别襟翼、自动驾驶或系统开关可能不响应标准 SimConnect 事件。标准验收机型为 Cessna 172。
+默认 A320neo V2 是本项目的主要验收机型：App 会重新加载世界地图已经生成的完整 `.PLN`，随后选择 GPS 航路源并请求 NAV/APP，同时回读实际 NAV1 频率和 APP/LOC/GS 状态。请先在世界地图中选好跑道、SID、STAR 和进近，并在 A320 MCDU/RAD NAV 中核对加载与自动调谐结果；当前 SimConnect SDK 对 `FlightPlanLoad` 不返回完成确认，也不能仅凭机场/跑道通用查询并创建一套新的机载进近程序。
+
+其他机型使用标准 SimConnect AP 降级流程。请先在游戏内选择进近程序、跑道并调好频率，App 负责 APP 预位及 LOC/GS 状态显示。复杂第三方飞机可能覆盖标准事件，因此襟翼、自动驾驶或专有 FMC/LNAV 可能需要单独的 Aircraft Profile。
 
 ## 无法连接时
 
@@ -135,4 +140,4 @@ docs/       网络协议和发布前验收清单
 .github/    Windows/iOS 自动构建工作流
 ```
 
-当前发布版本：`1.0.1`。
+当前发布版本：`1.1.0`。

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "SimConnect.lib")
@@ -30,6 +31,23 @@ enum : DWORD {
     EV_BRAKE_LEFT,
     EV_BRAKE_RIGHT,
     EV_AUTOPILOT_MASTER,
+    EV_AUTOPILOT_HEADING_ON,
+    EV_AUTOPILOT_HEADING_OFF,
+    EV_AUTOPILOT_NAV_ON,
+    EV_AUTOPILOT_NAV_OFF,
+    EV_AUTOPILOT_HEADING_SET,
+    EV_TOGGLE_GPS_DRIVES_NAV1,
+    EV_AP_ALTITUDE_SET,
+    EV_AP_ALTITUDE_ON,
+    EV_AP_ALTITUDE_OFF,
+    EV_AP_VS_SET,
+    EV_AP_VS_ON,
+    EV_AP_VS_OFF,
+    EV_AP_FLC_ON,
+    EV_AP_FLC_OFF,
+    EV_AP_SPEED_SET,
+    EV_AP_APPROACH_ON,
+    EV_AP_APPROACH_OFF,
     EV_FLIGHTPLAN,
     EV_FLIGHTPLAN_DEACTIVATED,
 };
@@ -37,10 +55,19 @@ enum : DWORD {
 // 与 AddToDataDefinition 顺序严格一致的遥测结构（全 double）
 struct SimData {
     double lat, lon, altitude, altAgl;
-    double heading, pitch, roll;
+    double heading, magneticHeading, pitch, roll;
     double groundSpeed, indicatedAirspeed, verticalSpeed;
     double flapsPercent, elevatorTrim, throttle;
     double gearDown, parkingBrake, onGround, autopilotMaster;
+    double autopilotHeadingLock, autopilotNavLock, autopilotHeading;
+    double gpsDrivesNav1;
+    double autopilotAltitudeLock, autopilotAltitudeArm, autopilotAltitude;
+    double autopilotVerticalHold, autopilotVerticalSpeed, autopilotFlightLevelChange;
+    double autopilotSpeed;
+    double autopilotApproachArm, autopilotApproachActive;
+    double autopilotGlideslopeArm, autopilotGlideslopeActive;
+    double gpsWaypointIndex, gpsWaypointDistance;
+    double nav1Frequency, nav1HasLocalizer, nav1HasGlideslope;
     double brakeLeft, brakeRight;
 };
 
@@ -106,6 +133,11 @@ std::string SimConnectManager::AircraftName() const {
     return aircraftName_;
 }
 
+bool SimConnectManager::HasActiveFlightPlan() const {
+    std::lock_guard<std::mutex> lock(activePlanMtx_);
+    return !activeFlightPlanPath_.empty();
+}
+
 bool SimConnectManager::EnqueueCommand(int cmd, int arg0) {
     if (!simConnected_.load()) return false;
     std::lock_guard<std::mutex> lock(cmdMtx_);
@@ -126,6 +158,7 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     data(DEF_PLANE, "PLANE ALTITUDE", "feet");
     data(DEF_PLANE, "PLANE ALT ABOVE GROUND", "feet");
     data(DEF_PLANE, "PLANE HEADING DEGREES TRUE", "degrees");
+    data(DEF_PLANE, "PLANE HEADING DEGREES MAGNETIC", "degrees");
     data(DEF_PLANE, "PLANE PITCH DEGREES", "degrees");
     data(DEF_PLANE, "PLANE BANK DEGREES", "degrees");
     data(DEF_PLANE, "GPS GROUND SPEED", "meters per second");
@@ -139,6 +172,26 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     data(DEF_PLANE, "BRAKE PARKING INDICATOR", "bool");
     data(DEF_PLANE, "SIM ON GROUND", "bool");
     data(DEF_PLANE, "AUTOPILOT MASTER", "bool");
+    data(DEF_PLANE, "AUTOPILOT HEADING LOCK", "bool");
+    data(DEF_PLANE, "AUTOPILOT NAV1 LOCK", "bool");
+    data(DEF_PLANE, "AUTOPILOT HEADING LOCK DIR:1", "degrees");
+    data(DEF_PLANE, "GPS DRIVES NAV1", "bool");
+    data(DEF_PLANE, "AUTOPILOT ALTITUDE LOCK", "bool");
+    data(DEF_PLANE, "AUTOPILOT ALTITUDE ARM", "bool");
+    data(DEF_PLANE, "AUTOPILOT ALTITUDE LOCK VAR:1", "feet");
+    data(DEF_PLANE, "AUTOPILOT VERTICAL HOLD", "bool");
+    data(DEF_PLANE, "AUTOPILOT VERTICAL HOLD VAR:1", "feet per minute");
+    data(DEF_PLANE, "AUTOPILOT FLIGHT LEVEL CHANGE", "bool");
+    data(DEF_PLANE, "AUTOPILOT AIRSPEED HOLD VAR:1", "knots");
+    data(DEF_PLANE, "AUTOPILOT APPROACH ARM", "bool");
+    data(DEF_PLANE, "AUTOPILOT APPROACH ACTIVE", "bool");
+    data(DEF_PLANE, "AUTOPILOT GLIDESLOPE ARM", "bool");
+    data(DEF_PLANE, "AUTOPILOT GLIDESLOPE ACTIVE", "bool");
+    data(DEF_PLANE, "GPS FLIGHT PLAN WP INDEX", "number");
+    data(DEF_PLANE, "GPS WP DISTANCE", "nautical miles");
+    data(DEF_PLANE, "NAV ACTIVE FREQUENCY:1", "MHz");
+    data(DEF_PLANE, "NAV HAS LOCALIZER:1", "bool");
+    data(DEF_PLANE, "NAV HAS GLIDE SLOPE:1", "bool");
     data(DEF_PLANE, "BRAKE LEFT POSITION", "position 32k");
     data(DEF_PLANE, "BRAKE RIGHT POSITION", "position 32k");
     data(DEF_TITLE, "TITLE", nullptr, SIMCONNECT_DATATYPE_STRING256);
@@ -150,7 +203,8 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     map(EV_AILERON, "AXIS_AILERONS_SET");
     map(EV_ELEVATOR, "AXIS_ELEVATOR_SET");
     map(EV_RUDDER, "AXIS_RUDDER_SET");
-    map(EV_THROTTLE, "AXIS_THROTTLE_SET");
+    // THROTTLE_SET 与手机协议同为 0..16383，0 明确代表 idle。
+    map(EV_THROTTLE, "THROTTLE_SET");
     map(EV_FLAPS_INCR, "FLAPS_INCR");
     map(EV_FLAPS_DECR, "FLAPS_DECR");
     map(EV_GEAR, "GEAR_TOGGLE");
@@ -160,6 +214,23 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     map(EV_BRAKE_LEFT, "AXIS_LEFT_BRAKE_SET");
     map(EV_BRAKE_RIGHT, "AXIS_RIGHT_BRAKE_SET");
     map(EV_AUTOPILOT_MASTER, "AP_MASTER");
+    map(EV_AUTOPILOT_HEADING_ON, "AP_HDG_HOLD_ON");
+    map(EV_AUTOPILOT_HEADING_OFF, "AP_HDG_HOLD_OFF");
+    map(EV_AUTOPILOT_NAV_ON, "AP_NAV1_HOLD_ON");
+    map(EV_AUTOPILOT_NAV_OFF, "AP_NAV1_HOLD_OFF");
+    map(EV_AUTOPILOT_HEADING_SET, "HEADING_BUG_SET");
+    map(EV_TOGGLE_GPS_DRIVES_NAV1, "TOGGLE_GPS_DRIVES_NAV1");
+    map(EV_AP_ALTITUDE_SET, "AP_ALT_VAR_SET_ENGLISH");
+    map(EV_AP_ALTITUDE_ON, "AP_ALT_HOLD_ON");
+    map(EV_AP_ALTITUDE_OFF, "AP_ALT_HOLD_OFF");
+    map(EV_AP_VS_SET, "AP_VS_VAR_SET_ENGLISH");
+    map(EV_AP_VS_ON, "AP_VS_ON");
+    map(EV_AP_VS_OFF, "AP_VS_OFF");
+    map(EV_AP_FLC_ON, "FLIGHT_LEVEL_CHANGE_ON");
+    map(EV_AP_FLC_OFF, "FLIGHT_LEVEL_CHANGE_OFF");
+    map(EV_AP_SPEED_SET, "AP_SPD_VAR_SET");
+    map(EV_AP_APPROACH_ON, "AP_APR_HOLD_ON");
+    map(EV_AP_APPROACH_OFF, "AP_APR_HOLD_OFF");
 
     if (FAILED(SimConnect_SubscribeToSystemEvent(
             h, EV_FLIGHTPLAN, "FlightPlanActivated"))) ok = false;
@@ -184,6 +255,13 @@ void SimConnectManager::HandleConnectionLost() {
     lastBrakeRefreshMs_ = 0;
     brakeReleaseUntilMs_ = 0;
     autopilotMaster_ = false;
+    autopilotHeadingLock_ = false;
+    autopilotNavLock_ = false;
+    gpsDrivesNav1_ = false;
+    autopilotAltitudeLock_ = false;
+    autopilotVerticalHold_ = false;
+    autopilotFlightLevelChange_ = false;
+    autopilotApproach_ = false;
     const bool wasConnected = simConnected_.exchange(false);
     {
         std::lock_guard<std::mutex> lock(cmdMtx_);
@@ -192,6 +270,10 @@ void SimConnectManager::HandleConnectionLost() {
     {
         std::lock_guard<std::mutex> lock(titleMtx_);
         aircraftName_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(activePlanMtx_);
+        activeFlightPlanPath_.clear();
     }
     if (fc_) fc_->NeutralizeAxes();
     if (wasConnected && onStatus_) onStatus_(false, "");
@@ -337,6 +419,111 @@ void SimConnectManager::DrainCommands(HANDLE h) {
                 autopilotMaster_ = false;
             }
             break;
+        case kEvAutopilotHeadingMode:
+            if (autopilotNavLock_) {
+                SendEvent(h, EV_AUTOPILOT_NAV_OFF, 0);
+                autopilotNavLock_ = false;
+            }
+            if (!autopilotHeadingLock_) {
+                SendEvent(h, EV_AUTOPILOT_HEADING_ON, 0);
+                autopilotHeadingLock_ = true;
+            }
+            break;
+        case kEvAutopilotNavMode:
+            if (autopilotHeadingLock_) {
+                SendEvent(h, EV_AUTOPILOT_HEADING_OFF, 0);
+                autopilotHeadingLock_ = false;
+            }
+            if (!autopilotNavLock_) {
+                SendEvent(h, EV_AUTOPILOT_NAV_ON, 0);
+                autopilotNavLock_ = true;
+            }
+            break;
+        case kEvAutopilotLateralOff:
+            if (autopilotHeadingLock_) SendEvent(h, EV_AUTOPILOT_HEADING_OFF, 0);
+            if (autopilotNavLock_) SendEvent(h, EV_AUTOPILOT_NAV_OFF, 0);
+            autopilotHeadingLock_ = false;
+            autopilotNavLock_ = false;
+            break;
+        case kEvAutopilotHeadingSet: {
+            const int heading = ((c.arg0 % 360) + 360) % 360;
+            SendEvent(h, EV_AUTOPILOT_HEADING_SET, static_cast<DWORD>(heading));
+            break;
+        }
+        case kEvNavigationSourceGps:
+            if (!gpsDrivesNav1_) {
+                SendEvent(h, EV_TOGGLE_GPS_DRIVES_NAV1, 0);
+                gpsDrivesNav1_ = true;
+            }
+            break;
+        case kEvNavigationSourceNav1:
+            if (gpsDrivesNav1_) {
+                SendEvent(h, EV_TOGGLE_GPS_DRIVES_NAV1, 0);
+                gpsDrivesNav1_ = false;
+            }
+            break;
+        case kEvAutopilotAltitudeSet:
+            SendEvent(h, EV_AP_ALTITUDE_SET,
+                      static_cast<DWORD>(std::clamp(c.arg0, 0, 60000)));
+            break;
+        case kEvAutopilotAltitudeHold:
+            if (autopilotVerticalHold_) SendEvent(h, EV_AP_VS_OFF, 0);
+            if (autopilotFlightLevelChange_) SendEvent(h, EV_AP_FLC_OFF, 0);
+            if (!autopilotAltitudeLock_) SendEvent(h, EV_AP_ALTITUDE_ON, 0);
+            autopilotVerticalHold_ = false;
+            autopilotFlightLevelChange_ = false;
+            autopilotAltitudeLock_ = true;
+            break;
+        case kEvAutopilotVerticalSpeedSet:
+            SendEvent(h, EV_AP_VS_SET, static_cast<DWORD>(static_cast<int32_t>(
+                std::clamp(c.arg0, -6000, 6000))));
+            break;
+        case kEvAutopilotVerticalSpeedMode:
+            if (autopilotAltitudeLock_) SendEvent(h, EV_AP_ALTITUDE_OFF, 0);
+            if (autopilotFlightLevelChange_) SendEvent(h, EV_AP_FLC_OFF, 0);
+            if (!autopilotVerticalHold_) SendEvent(h, EV_AP_VS_ON, 0);
+            autopilotAltitudeLock_ = false;
+            autopilotFlightLevelChange_ = false;
+            autopilotVerticalHold_ = true;
+            break;
+        case kEvAutopilotFlightLevelChangeMode:
+            if (autopilotAltitudeLock_) SendEvent(h, EV_AP_ALTITUDE_OFF, 0);
+            if (autopilotVerticalHold_) SendEvent(h, EV_AP_VS_OFF, 0);
+            if (!autopilotFlightLevelChange_) SendEvent(h, EV_AP_FLC_ON, 0);
+            autopilotAltitudeLock_ = false;
+            autopilotVerticalHold_ = false;
+            autopilotFlightLevelChange_ = true;
+            break;
+        case kEvAutopilotVerticalOff:
+            if (autopilotAltitudeLock_) SendEvent(h, EV_AP_ALTITUDE_OFF, 0);
+            if (autopilotVerticalHold_) SendEvent(h, EV_AP_VS_OFF, 0);
+            if (autopilotFlightLevelChange_) SendEvent(h, EV_AP_FLC_OFF, 0);
+            autopilotAltitudeLock_ = false;
+            autopilotVerticalHold_ = false;
+            autopilotFlightLevelChange_ = false;
+            break;
+        case kEvAutopilotSpeedSet:
+            SendEvent(h, EV_AP_SPEED_SET,
+                      static_cast<DWORD>(std::clamp(c.arg0, 40, 400)));
+            break;
+        case kEvAutopilotApproachOn:
+            if (!autopilotApproach_) SendEvent(h, EV_AP_APPROACH_ON, 0);
+            autopilotApproach_ = true;
+            break;
+        case kEvAutopilotApproachOff:
+            if (autopilotApproach_) SendEvent(h, EV_AP_APPROACH_OFF, 0);
+            autopilotApproach_ = false;
+            break;
+        case kEvSyncFlightPlan: {
+            std::string path;
+            {
+                std::lock_guard<std::mutex> lock(activePlanMtx_);
+                path = activeFlightPlanPath_;
+            }
+            if (!path.empty() && FAILED(SimConnect_FlightPlanLoad(h, path.c_str())))
+                reconnectRequested_ = true;
+            break;
+        }
         default: break;
         }
     }
@@ -361,7 +548,8 @@ void SimConnectManager::OnDispatch(void* pData) {
             AircraftTelemetry t;
             t.lat = d->lat; t.lon = d->lon;
             t.altitude = d->altitude; t.altAgl = d->altAgl;
-            t.heading = d->heading; t.pitch = d->pitch; t.roll = d->roll;
+            t.heading = d->heading; t.magneticHeading = d->magneticHeading;
+            t.pitch = d->pitch; t.roll = d->roll;
             t.groundSpeed = d->groundSpeed; t.indicatedAirspeed = d->indicatedAirspeed;
             t.verticalSpeed = d->verticalSpeed;
             t.flapsPercent = d->flapsPercent;
@@ -373,6 +561,35 @@ void SimConnectManager::OnDispatch(void* pData) {
             t.onGround = d->onGround > 0.5;
             t.autopilotMaster = d->autopilotMaster > 0.5;
             autopilotMaster_ = t.autopilotMaster;
+            t.autopilotHeadingLock = d->autopilotHeadingLock > 0.5;
+            t.autopilotNavLock = d->autopilotNavLock > 0.5;
+            t.autopilotHeading = std::fmod(d->autopilotHeading, 360.0);
+            if (t.autopilotHeading < 0) t.autopilotHeading += 360.0;
+            autopilotHeadingLock_ = t.autopilotHeadingLock;
+            autopilotNavLock_ = t.autopilotNavLock;
+            t.gpsDrivesNav1 = d->gpsDrivesNav1 > 0.5;
+            gpsDrivesNav1_ = t.gpsDrivesNav1;
+            t.autopilotAltitudeLock = d->autopilotAltitudeLock > 0.5;
+            t.autopilotAltitudeArm = d->autopilotAltitudeArm > 0.5;
+            t.autopilotAltitude = d->autopilotAltitude;
+            t.autopilotVerticalHold = d->autopilotVerticalHold > 0.5;
+            t.autopilotVerticalSpeed = d->autopilotVerticalSpeed;
+            t.autopilotFlightLevelChange = d->autopilotFlightLevelChange > 0.5;
+            t.autopilotSpeed = d->autopilotSpeed;
+            t.autopilotApproachArm = d->autopilotApproachArm > 0.5;
+            t.autopilotApproachActive = d->autopilotApproachActive > 0.5;
+            t.autopilotGlideslopeArm = d->autopilotGlideslopeArm > 0.5;
+            t.autopilotGlideslopeActive = d->autopilotGlideslopeActive > 0.5;
+            t.gpsWaypointIndex = std::max(0, static_cast<int>(d->gpsWaypointIndex));
+            t.gpsWaypointDistance = std::max(0.0, d->gpsWaypointDistance);
+            t.nav1Frequency = std::max(0.0, d->nav1Frequency);
+            t.nav1HasLocalizer = d->nav1HasLocalizer > 0.5;
+            t.nav1HasGlideslope = d->nav1HasGlideslope > 0.5;
+            autopilotAltitudeLock_ = t.autopilotAltitudeLock;
+            autopilotVerticalHold_ = t.autopilotVerticalHold;
+            autopilotFlightLevelChange_ = t.autopilotFlightLevelChange;
+            autopilotApproach_ = t.autopilotApproachArm || t.autopilotApproachActive ||
+                                 t.autopilotGlideslopeArm || t.autopilotGlideslopeActive;
             t.brakeLeft = std::clamp(d->brakeLeft / 32768.0, 0.0, 1.0);
             t.brakeRight = std::clamp(d->brakeRight / 32768.0, 0.0, 1.0);
             t.seq = telemetrySeq_.fetch_add(1);
@@ -392,6 +609,10 @@ void SimConnectManager::OnDispatch(void* pData) {
         auto* ev = static_cast<SIMCONNECT_RECV_EVENT_FILENAME*>(pRecv);
         if (ev->uEventID == EV_FLIGHTPLAN && onFlightPlan_) {
             ev->szFileName[MAX_PATH - 1] = '\0';
+            {
+                std::lock_guard<std::mutex> lock(activePlanMtx_);
+                activeFlightPlanPath_ = ev->szFileName;
+            }
             std::wstring path = PathFromSimConnect(ev->szFileName);
             if (!path.empty()) onFlightPlan_(path);
         }
@@ -399,8 +620,13 @@ void SimConnectManager::OnDispatch(void* pData) {
     }
     case SIMCONNECT_RECV_ID_EVENT: {
         auto* ev = static_cast<SIMCONNECT_RECV_EVENT*>(pRecv);
-        if (ev->uEventID == EV_FLIGHTPLAN_DEACTIVATED && onFlightPlan_)
-            onFlightPlan_(L"");
+        if (ev->uEventID == EV_FLIGHTPLAN_DEACTIVATED) {
+            {
+                std::lock_guard<std::mutex> lock(activePlanMtx_);
+                activeFlightPlanPath_.clear();
+            }
+            if (onFlightPlan_) onFlightPlan_(L"");
+        }
         // 某些 SDK 会额外投递普通 EVENT，但这里不含文件名，等待
         // EVENT_FILENAME，避免用空路径覆盖有效路线。
         break;
@@ -409,8 +635,12 @@ void SimConnectManager::OnDispatch(void* pData) {
         simConnected_ = true;
         break;
     case SIMCONNECT_RECV_ID_QUIT:
-    case SIMCONNECT_RECV_ID_EXCEPTION:
         reconnectRequested_ = true;
+        break;
+    case SIMCONNECT_RECV_ID_EXCEPTION:
+        // 机模拒绝某个标准事件或 FlightPlanLoad 失败，不代表 SimConnect
+        // 连接已经断开。若在这里重连，复杂机型的一次不支持命令会让全部
+        // 遥测和控制进入永久重连循环；保持会话并让真实遥测反映未生效状态。
         break;
     default:
         break;

@@ -21,7 +21,7 @@ public:
     using StatusGetter = std::function<std::pair<bool, std::string>()>;
 
     void Start(uint16_t port, SimConnectManager* sim, FlightController* fc,
-               FlightPlanManager* fp, StatusGetter status);
+               StatusGetter status);
     void Stop();
 
     uint32_t SessionId() const { return sessionId_.load(); }
@@ -51,7 +51,6 @@ private:
 
     SimConnectManager* sim_ = nullptr;
     FlightController* fc_ = nullptr;
-    FlightPlanManager* fp_ = nullptr;
     StatusGetter status_;
 
     std::atomic<uint32_t> sessionId_{ 0 };

@@ -13,6 +13,7 @@ std::string FormatTelemetry(const AircraftTelemetry& t, const std::string& aircr
        << ",\"alt\":" << t.altitude
        << ",\"altAgl\":" << t.altAgl
        << ",\"hdg\":" << t.heading
+       << ",\"magHdg\":" << t.magneticHeading
        << ",\"pitch\":" << t.pitch
        << ",\"roll\":" << t.roll
        << ",\"gs\":" << t.groundSpeed
@@ -25,6 +26,26 @@ std::string FormatTelemetry(const AircraftTelemetry& t, const std::string& aircr
        << ",\"parkingBrake\":" << (t.parkingBrake ? "true" : "false")
        << ",\"onGround\":" << (t.onGround ? "true" : "false")
        << ",\"autopilot\":" << (t.autopilotMaster ? "true" : "false")
+       << ",\"apHeadingLock\":" << (t.autopilotHeadingLock ? "true" : "false")
+       << ",\"apNavLock\":" << (t.autopilotNavLock ? "true" : "false")
+       << ",\"apHeading\":" << t.autopilotHeading
+       << ",\"gpsDrivesNav1\":" << (t.gpsDrivesNav1 ? "true" : "false")
+       << ",\"apAltitudeLock\":" << (t.autopilotAltitudeLock ? "true" : "false")
+       << ",\"apAltitudeArm\":" << (t.autopilotAltitudeArm ? "true" : "false")
+       << ",\"apAltitude\":" << t.autopilotAltitude
+       << ",\"apVerticalHold\":" << (t.autopilotVerticalHold ? "true" : "false")
+       << ",\"apVerticalSpeed\":" << t.autopilotVerticalSpeed
+       << ",\"apFlc\":" << (t.autopilotFlightLevelChange ? "true" : "false")
+       << ",\"apSpeed\":" << t.autopilotSpeed
+       << ",\"apApproachArm\":" << (t.autopilotApproachArm ? "true" : "false")
+       << ",\"apApproachActive\":" << (t.autopilotApproachActive ? "true" : "false")
+       << ",\"apGlideslopeArm\":" << (t.autopilotGlideslopeArm ? "true" : "false")
+       << ",\"apGlideslopeActive\":" << (t.autopilotGlideslopeActive ? "true" : "false")
+       << ",\"gpsWpIndex\":" << t.gpsWaypointIndex
+       << ",\"gpsWpDistance\":" << t.gpsWaypointDistance
+       << ",\"nav1Frequency\":" << t.nav1Frequency
+       << ",\"nav1HasLocalizer\":" << (t.nav1HasLocalizer ? "true" : "false")
+       << ",\"nav1HasGlideslope\":" << (t.nav1HasGlideslope ? "true" : "false")
        << ",\"brakeLeft\":" << t.brakeLeft
        << ",\"brakeRight\":" << t.brakeRight
        << ",\"seq\":" << t.seq
