@@ -63,11 +63,8 @@ struct ControlView: View {
             ThrottleView(telemetryThrottle: conn.aircraft.throttle,
                          autothrottleActive: conn.aircraft.autothrottleActive,
                          enabled: conn.simConnected,
-                         onBegin: { conn.beginThrottle($0) },
-                         onChange: { conn.setThrottle($0) },
-                         onEnd: { conn.endThrottle() },
-                         onTakeover: { conn.takeOverThrottle() },
-                         onIdle: { conn.forceThrottleIdle() })
+                         onDecrease: { conn.decreaseThrottle() },
+                         onIncrease: { conn.increaseThrottle() })
                 .frame(maxHeight: .infinity)
         }
     }

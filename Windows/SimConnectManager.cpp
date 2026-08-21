@@ -30,6 +30,8 @@ enum : DWORD {
     EV_PARKING,
     EV_BRAKE_LEFT,
     EV_BRAKE_RIGHT,
+    EV_THROTTLE_INCR,
+    EV_THROTTLE_DECR,
     EV_THROTTLE_CUT,
     EV_AUTOTHROTTLE_DISCONNECT,
     EV_AUTOPILOT_MASTER,
@@ -218,6 +220,8 @@ bool SimConnectManager::ConfigureConnection(HANDLE h) {
     map(EV_PARKING, "PARKING_BRAKES");
     map(EV_BRAKE_LEFT, "AXIS_LEFT_BRAKE_SET");
     map(EV_BRAKE_RIGHT, "AXIS_RIGHT_BRAKE_SET");
+    map(EV_THROTTLE_INCR, "THROTTLE_INCR");
+    map(EV_THROTTLE_DECR, "THROTTLE_DECR");
     map(EV_THROTTLE_CUT, "THROTTLE_CUT");
     map(EV_AUTOTHROTTLE_DISCONNECT, "AUTO_THROTTLE_DISCONNECT");
     map(EV_AUTOPILOT_MASTER, "AP_MASTER");
@@ -409,6 +413,14 @@ void SimConnectManager::DrainCommands(HANDLE h) {
             SendEvent(h, EV_BRAKE_LEFT, static_cast<DWORD>(kBrakeReleased));
             SendEvent(h, EV_BRAKE_RIGHT, static_cast<DWORD>(kBrakeReleased));
             lastBrakeRefreshMs_ = NowMs();
+            break;
+        case kEvThrottleIncr:
+            SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);
+            SendEvent(h, EV_THROTTLE_INCR, 0);
+            break;
+        case kEvThrottleDecr:
+            SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);
+            SendEvent(h, EV_THROTTLE_DECR, 0);
             break;
         case kEvThrottleTakeover:
             SendEvent(h, EV_AUTOTHROTTLE_DISCONNECT, 0);

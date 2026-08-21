@@ -284,6 +284,8 @@ void TCPServer::ProcessLine(SOCKET client, const std::string& line) {
         else if (name == proto::kCmdParking) command = kEvParking;
         else if (name == proto::kCmdBrake)
             command = j.boolean("value", false) ? kEvBrakeHold : kEvBrakeRelease;
+        else if (name == proto::kCmdThrottleIncr) command = kEvThrottleIncr;
+        else if (name == proto::kCmdThrottleDecr) command = kEvThrottleDecr;
         else if (name == proto::kCmdThrottleTakeover) command = kEvThrottleTakeover;
         else if (name == proto::kCmdThrottleSet) {
             const double value = j.num("value", -1);

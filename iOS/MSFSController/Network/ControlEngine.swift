@@ -16,8 +16,6 @@ final class ControlEngine {
     private var smoothElevator: Float = 0
     private var autopilotActive = false
 
-    private var throttleActive = false
-    private var throttle: Float = 0
     private var rudderDragging = false
     private var rudder: Float = 0
 
@@ -52,7 +50,6 @@ final class ControlEngine {
         smoothAileron = 0
         smoothElevator = 0
         autopilotActive = false
-        throttleActive = false
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -79,27 +76,6 @@ final class ControlEngine {
         lock.unlock()
     }
 
-    func beginThrottle(_ v: Float) {
-        lock.lock()
-        throttleActive = true
-        throttle = min(max(v, 0), 1)
-        lock.unlock()
-    }
-    func setThrottle(_ v: Float) {
-        lock.lock()
-        throttleActive = true
-        throttle = min(max(v, 0), 1)
-        lock.unlock()
-    }
-    /// 松手后返回最终目标并释放实时 UDP 轴；最终值由 TCP 可靠提交。
-    func endThrottle() -> Float {
-        lock.lock()
-        throttleActive = false
-        let finalValue = throttle
-        lock.unlock()
-        return finalValue
-    }
-
     func beginRudder(_ v: Float) {
         lock.lock(); rudderDragging = true; rudder = min(max(v, -1), 1); lock.unlock()
     }
@@ -111,10 +87,9 @@ final class ControlEngine {
     }
 
     /// 后台、断线或 MSFS 离线时终止所有瞬时输入。
-    /// 油门数值保留用于 UI，但不再覆盖模拟器；方向舵立即归零。
+    /// 方向舵立即归零；油门只使用离散 TCP 命令，不存在需要释放的实时轴。
     func cancelTransientInputs() {
         lock.lock()
-        throttleActive = false
         rudderDragging = false
         rudder = 0
         lock.unlock()
@@ -140,7 +115,6 @@ final class ControlEngine {
         guard sessionId != 0 else { return nil }
         var mask: UInt16 = 0
         var ail: Int16 = 0, elev: Int16 = 0, rud: Int16 = 0
-        var thr: UInt16 = 0
         let timestamp = nowMs()
 
         if armed && !autopilotActive {
@@ -169,13 +143,6 @@ final class ControlEngine {
             rud = Self.rudderAxis(rudder)
             mask |= Proto.kAxisRudder
         }
-        // 只在拖动期间实时占用；松手由可靠 TCP 提交最终值后释放，避免与
-        // A/THR、驾驶舱操作或实体油门长期争夺同一控制轴。
-        if throttleActive {
-            thr = UInt16(min(max(throttle, 0), 1) * Float(Proto.throttleMax))
-            mask |= Proto.kAxisThrottle
-        }
-
         guard mask != 0 else { return nil }
         sequence &+= 1
         return UdpPacket(type: Proto.UdpType.control.rawValue,
@@ -186,7 +153,7 @@ final class ControlEngine {
                          aileron: ail,
                          elevator: elev,
                          rudder: rud,
-                         throttle: thr).encode()
+                         throttle: 0).encode()
     }
 
     /// Ping 包

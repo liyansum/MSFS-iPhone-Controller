@@ -59,7 +59,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ### iPhone → PC
 
 ```json
-{"type":"hello","protocolVersion":1,"appVersion":"1.1.2","deviceName":"iPhone"}
+{"type":"hello","protocolVersion":1,"appVersion":"1.1.3","deviceName":"iPhone"}
 ```
 
 ```json
@@ -70,6 +70,8 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 {"type":"cmd","name":"trim_dn"}
 {"type":"cmd","name":"parking_brake"}
 {"type":"cmd","name":"brake","value":true}
+{"type":"cmd","name":"throttle_decr"}
+{"type":"cmd","name":"throttle_incr"}
 {"type":"cmd","name":"throttle_takeover"}
 {"type":"cmd","name":"throttle_set","value":8192}
 {"type":"cmd","name":"throttle_idle"}
@@ -88,8 +90,8 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ```
 
 `brake.value=true` 表示按住刹车，`false` 表示释放。Windows 按住期间持续刷新左右轮制动，松开后短时重复发送完全释放值。
-`throttle_takeover` 在用户开始拖动时断开 A/THR。拖动期间 UDP 提供实时变化；松手后 `throttle_set` 以 TCP 可靠提交 0..16383 的最终值，随后 iOS 释放实时油门轴，使游戏、A/THR 或实体控制器的后续变化能通过遥测同步回手机。
-`throttle_idle` 表示用户明确把手机油门拉到 0%。Windows 会先请求断开全部发动机 A/THR，再执行 `THROTTLE_CUT` 和标准轴 0；iOS 在 A/THR 或实际油门仍高于 idle 时以低频闭环重试。
+`throttle_decr/throttle_incr` 是当前 iOS 界面使用的油门命令。每次点击先断开 A/THR，再通过 MSFS 原生事件减小/增大全部发动机 10%；没有手机目标值，也不会持续占用 UDP 油门轴。
+`throttle_takeover/throttle_set/throttle_idle` 仅为兼容 1.1.2 客户端保留；新界面不再发送这些绝对油门命令。
 `autopilot.value=true` 表示开启自动驾驶总开关，`false` 表示关闭；显示状态以遥测回读为准。
 `autopilot_mode` 在标准 HDG/NAV 横向模式间明确切换，`off` 只关闭横向模式，不关闭 AP Master。
 `autopilot_heading` 设置 0..359 度航向游标；iPhone 的“设定并进入 HDG”会先设置游标再进入 HDG。
@@ -102,7 +104,7 @@ bit0 AILERON    bit1 ELEVATOR    bit2 RUDDER    bit3 THROTTLE
 ### PC → iPhone
 
 ```json
-{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.2","simConnected":true,"aircraftName":"Cessna 172"}
+{"type":"welcome","protocolVersion":1,"sessionId":1234,"serverVersion":"1.1.3","simConnected":true,"aircraftName":"Cessna 172"}
 ```
 
 ```json

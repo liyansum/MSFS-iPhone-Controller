@@ -316,41 +316,8 @@ final class ConnectionManager: ObservableObject {
 
     // MARK: - 轴输入（由视图调用）
 
-    func beginThrottle(_ v: Float) {
-        guard phase == .connected, simConnected else { return }
-        // 手指操作代表明确请求手动推力，先解除可能仍在接管的 A/THR。
-        takeOverThrottle()
-        engine.beginThrottle(v)
-        sendControlImmediately()
-    }
-    func setThrottle(_ v: Float) {
-        guard phase == .connected, simConnected else { return }
-        engine.setThrottle(v)
-        sendControlImmediately()
-    }
-    func endThrottle() {
-        let finalValue = engine.endThrottle()
-        guard phase == .connected, simConnected else { return }
-        if finalValue <= 0.015 {
-            // 已释放实时轴，只通过 TCP 可靠提交 idle，不能再次激活持续 UDP 油门。
-            sendCommand(TcpCmd.throttleIdle)
-        } else {
-            sendNumericCommand(TcpCmd.throttleSet,
-                               value: Int((finalValue * Float(Proto.throttleMax)).rounded()))
-        }
-    }
-
-    func takeOverThrottle() {
-        sendCommand(TcpCmd.throttleTakeover)
-    }
-
-    /// 用户把手机油门明确拉到 0%：断开可能仍在接管的 A/THR，并强制 idle。
-    func forceThrottleIdle() {
-        guard phase == .connected, simConnected else { return }
-        engine.setThrottle(0)
-        sendControlImmediately()
-        sendCommand(TcpCmd.throttleIdle)
-    }
+    func increaseThrottle() { sendCommand(TcpCmd.throttleIncr) }
+    func decreaseThrottle() { sendCommand(TcpCmd.throttleDecr) }
 
     func beginRudder(_ v: Float) {
         guard phase == .connected, simConnected else { return }
@@ -557,7 +524,7 @@ final class ConnectionManager: ObservableObject {
         let obj: [String: Any] = [
             "type": TcpMsg.hello,
             "protocolVersion": Proto.protocolVersion,
-            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2",
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.3",
             "deviceName": UIDevice.current.name,
         ]
         if let json = Self.encode(obj) { tcp.send(json: json) }

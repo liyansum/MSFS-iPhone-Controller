@@ -38,13 +38,12 @@ xcodebuild -project iOS/MSFSController.xcodeproj \
    前/后倾斜只控制升降舵。分别在 Landscape Left/Right 下验证方向一致。
 4. RECENTER 后当前握持姿势应立即成为中立；Deadzone、Expo、Sensitivity、
    Smoothing 与 Invert 设置应即时生效。
-5. 拖动 Rudder 后松手必须回中。Throttle 开始拖动时应以当前 `SIM` 回读值为起点，
-   上拖增加、下拖减小；松手后滑杆必须恢复显示游戏实际值，不得长期停在旧 `SET`
-   目标或持续与驾驶舱/实体油门争夺控制。Trim、Flaps、Gear、Parking Brake、
-   Autopilot 状态必须以 MSFS 回读为准。关闭 GYRO 后继续把油门依次设为 0%、50%、
-   100%，实际 SIM 数值应跟随且 GYRO 状态不影响油门。再接通 A320 A/THR，使其实际推力高于 50%，把手机
-   油门拉到 0%：A/THR 应断开，实际 `SIM` 油门应在数秒内保持低于 3%，不能反弹至
-   90%。Flaps± 应切换飞机自身的合法档位。
+5. 拖动 Rudder 后松手必须回中。点击 Throttle − / + 时，每次应先断开 A/THR，
+   再将全部发动机油门减小/增大 10%；按住约 0.4 秒后应连续变化，松手、断线或切页
+   必须立即停止。中间百分比必须始终显示 `SIM` 实际回读。
+   停止点击后 iPhone 不得继续发送油门轴或保存目标，驾驶舱、实体油门和 A/THR 的
+   后续变化应正常回显。关闭 GYRO 后按钮仍必须有效。Trim、Flaps、Gear、Parking
+   Brake、Autopilot 状态必须以 MSFS 回读为准。Flaps± 应切换机型合法档位。
 6. 按住 Brake 后松手必须释放，按钮显示的左右轮实际制动应回到 5% 以下。按住期间
    切页、锁屏、断开 TCP 或关闭手机 Wi-Fi，刹车必须释放，Aileron/Elevator/Rudder
    必须在 250 ms 左右回中。
